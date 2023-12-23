@@ -4,8 +4,9 @@ import logging
 
 from ryu.base import app_manager
 from ncclient import manager
+from ryu.controller.handler import set_ev_cls
 
-from src.events import EventControllerReady
+from src.events import EventControllerReady, RequestEnableLldp, ReplyEnableLldp
 
 # Responsible for managing NETCONF communication with NETCONF devices
 class NetconfController(app_manager.RyuApp):
@@ -21,7 +22,7 @@ class NetconfController(app_manager.RyuApp):
         super(NetconfController, self).start()
 
         self.devices = self.connect_devices()
-        self.send_event_to_observers(EventControllerReady(str(self.devices.keys())))
+        self.send_event_to_observers(EventControllerReady(self.devices.keys()))
 
     # Read IP addresses from the config file, and returns list of valid IP addresses
     def read_config(self):
@@ -177,6 +178,7 @@ class NetconfController(app_manager.RyuApp):
             self.logger.error(f'Failed to get neighbors from {ip_address}: {str(e)}')
         
     # Enable LLDP on device, globally and on interfaces
+    # Returns True if successful, False otherwise
     def enable_lldp(self, ip_address):
         device = self.devices[ip_address]
 
@@ -185,5 +187,13 @@ class NetconfController(app_manager.RyuApp):
             self.enable_interfaces_lldp(device, ip_address)
             device.commit()
 
+            return True
         except Exception as e:
             self.logger.error(f'Failed to enable LLDP on {ip_address}: {str(e)}')
+            return False
+        
+    @set_ev_cls(RequestEnableLldp)
+    def request_enable_lldp(self, req):
+        result = self.enable_lldp(req.ip_address)
+
+        self.reply_to_request(req, ReplyEnableLldp(req.ip_address, result))
