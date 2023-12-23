@@ -26,12 +26,21 @@ class NetconfController(app_manager.RyuApp):
     # Read IP addresses from the config file, and returns list of valid IP addresses
     def read_config(self):
         addresses = []
+
+        line_count = 0
+
         with open('config/netconf.txt', 'r') as file:
             for line in file.read().splitlines():
                 if line.strip() == '' or line[0] == '#':
                     continue
-
-                if re.match(r'^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$', line):
+                
+                if line_count == 0:
+                    self.user = line.split('=')[1].strip()
+                    line_count += 1
+                elif line_count == 1:
+                    self.password = line.split('=')[1].strip()
+                    line_count += 1
+                elif re.match(r'^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$', line):
                     addresses.append(line)
                 else:
                     self.logger.error(f'Invalid IP address: {line}')
@@ -45,8 +54,8 @@ class NetconfController(app_manager.RyuApp):
                 device_manager = manager.connect(
                     host=ip_address,
                     port=830,
-                    username='azzam',
-                    password='password',
+                    username=self.user,
+                    password=self.password,
                     hostkey_verify=False
                 )
                 devices[ip_address] = device_manager

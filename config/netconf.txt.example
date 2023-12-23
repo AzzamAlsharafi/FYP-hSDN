@@ -1,6 +1,11 @@
 # Example of a configuration file for classic devices (Non-SDN)
-# Each line represents a single device.
-# Lines beginning with '#' are ignored.
+# Empty lines, and lines beginning with '#' are ignored.
+
+# First two valid lines set NETCONF username and password for all device
+user = USERNAME
+pass = PASSWORD
+
+# Each line represents a single device. 
 192.168.1.11
 192.168.1.12
 192.168.1.21
