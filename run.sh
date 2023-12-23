@@ -1,4 +1,6 @@
 #!/bin/bash
 source ./.venv/bin/activate
 
-ryu-manager --verbose ./src/myapp.py
+export PYTHONPATH=.
+
+ryu-manager --verbose ./src/controllers/netconf.py ./src/topology/classic.py 

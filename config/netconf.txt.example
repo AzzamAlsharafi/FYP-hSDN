@@ -1,0 +1,7 @@
+# Example of a configuration file for classic devices (Non-SDN)
+# Each line represents a single device.
+# Lines beginning with '#' are ignored.
+192.168.1.11
+192.168.1.12
+192.168.1.21
+192.168.1.22
