@@ -1,4 +1,4 @@
-from ryu.controller.event import EventBase, EventRequestBase, EventReplyBase
+from ryu.controller.event import EventRequestBase, EventReplyBase
 
 # Request sent to NETCONF controller to enable LLDP
 class RequestNetconfDiscovery(EventRequestBase):
