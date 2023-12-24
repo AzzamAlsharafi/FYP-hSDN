@@ -6,29 +6,25 @@ from ryu.base import app_manager
 from ncclient import manager
 from ryu.controller.handler import set_ev_cls
 
-from src.events import EventControllerReady, RequestEnableLldp, ReplyEnableLldp
+from src.events import RequestNetconfDiscovery, ReplyNetconfDiscovery
 
 # Responsible for managing NETCONF communication with NETCONF devices
 class NetconfController(app_manager.RyuApp):
-    _EVENTS = [EventControllerReady]
-
     def __init__(self, *args, **kwargs):
         super(NetconfController, self).__init__(*args, **kwargs)
 
         # Silent ncclient info logs
         logging.getLogger('ncclient').setLevel(logging.WARNING)
-    
-    def start(self):
-        super(NetconfController, self).start()
 
-        self.devices = self.connect_devices()
-        self.send_event_to_observers(EventControllerReady(self.devices.keys()))
+        self.read_config()
 
-    # Read IP addresses from the config file, and returns list of valid IP addresses
+    # Load NETCONF credentials and IP addresses from config/netconf.txt
     def read_config(self):
-        addresses = []
+        self.devices = []
 
         line_count = 0
+        user = ''
+        password = ''
 
         with open('config/netconf.txt', 'r') as file:
             for line in file.read().splitlines():
@@ -36,37 +32,77 @@ class NetconfController(app_manager.RyuApp):
                     continue
                 
                 if line_count == 0:
-                    self.user = line.split('=')[1].strip()
+                    user = line.split('=')[1].strip()
                     line_count += 1
                 elif line_count == 1:
-                    self.password = line.split('=')[1].strip()
+                    password = line.split('=')[1].strip()
                     line_count += 1
-                elif re.match(r'^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$', line):
-                    addresses.append(line)
+                elif re.match(r'^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$', line): # Regex for IPv4 address
+                    self.devices.append(Device(line, user, password))
                 else:
                     self.logger.error(f'Invalid IP address: {line}')
-        return addresses
     
-    # Establish NETCONF connections with devices, and returns a dictionary of NETCONF managers
-    def connect_devices(self):
-        devices = {}
-        for ip_address in self.read_config():
-            try:
-                device_manager = manager.connect(
-                    host=ip_address,
-                    port=830,
-                    username=self.user,
-                    password=self.password,
-                    hostkey_verify=False
-                )
-                devices[ip_address] = device_manager
-            except Exception as e:
-                self.logger.error(f'Failed to establish NETCONF connection with {ip_address}: {str(e)}')
+    # Runs discovery on all devices
+    def discover_all(self):
+        topology = {} # {device_ip: interfaces}
 
-        return devices
+        for device in self.devices:
+            device.discover()
 
-    # Enable global LLDP on device
-    def enable_global_lldp(self, device, ip_address):
+            if device.manager and device.lldp:
+                topology[device.ip_address] = device.interfaces
+            elif device.manager:
+                topology[device.ip_address] = 'LLDP disabled'
+            else:
+                topology[device.ip_address] = 'Disconnected'
+
+        return topology
+
+    @set_ev_cls(RequestNetconfDiscovery)
+    def request_enable_lldp(self, req):
+        self.reply_to_request(req, ReplyNetconfDiscovery(self.discover_all()))
+
+# TODO: Better support and handling for dynamic topology changes (device get enabled, disabled, etc...)
+#       Way for detecting device shutdown
+class Device:
+    def __init__(self, ip_address, user, password):
+        self.ip_address = ip_address
+        self.user = user # NETCONF username
+        self.password = password # NETCONF password
+        self.manager = None # NETCONF manager (ncclient)
+        self.lldp = False # LLDP enabled or disabled
+        self.interfaces = {} # {interface_name: [neighbor_name, ...]}
+
+        self.logger = logging.getLogger(f'NetconfController-{self.ip_address}')
+        self.logger.setLevel(logging.INFO)
+
+    # Perform topology discovery on this device
+    def discover(self):
+        if self.manager is None: # NETCONF connection not established
+            self.connect()
+        elif not self.lldp: # LLDP disabled
+            self.enable_lldp()
+        else: # LLDP enabled, discover neighbors
+            self.get_neighbors()
+    
+    # Establish NETCONF connection with device
+    def connect(self):
+        try:
+            self.manager = manager.connect(
+                host=self.ip_address,
+                port=830,
+                username=self.user,
+                password=self.password,
+                hostkey_verify=False,
+                timeout=10
+            )
+            self.logger.debug(f'Established NETCONF connection with {self.ip_address}')
+            self.enable_lldp()
+        except Exception as e:
+            self.logger.error(f'Failed to establish NETCONF connection with {self.ip_address}: {str(e)}')
+    
+    # Enable LLDP on device
+    def enable_lldp(self):
         config='''
                     <config xmlns="urn:ietf:params:xml:ns:netconf:base:1.0">
                         <lldp xmlns="http://openconfig.net/yang/lldp">
@@ -75,78 +111,33 @@ class NetconfController(app_manager.RyuApp):
                             </config>
                         </lldp>
                     </config>
-                '''
+                '''        
         try:
-            device.edit_config(config=config)
+            self.manager.edit_config(config=config)
+            self.manager.commit()
+            self.lldp = True
+            self.logger.debug(f'Enabled LLDP on {self.ip_address}')
+            self.get_neighbors()
         except Exception as e:
-            self.logger.error(f'Failed to enable global LLDP on {ip_address}: {str(e)}')
-    
-    # Returns a list of interface names
-    def get_interfaces(self, device, ip_address):
-        # Use openconfig-lldp instead of openconfig-interfaces because the interest is only in LLDP-supported interfaces
-        interface_filter = '''
-                        <filter xmlns="urn:ietf:params:xml:ns:netconf:base:1.0">
-                            <lldp xmlns="http://openconfig.net/yang/lldp">
-                                <interfaces>
-                                    <interface>
-                                        <name></name>
-                                        <state>
-                                            <enabled></enabled>
-                                        </state>
-                                    </interface>
-                                </interfaces>
-                            </lldp>
-                        </filter>
-                        '''
-        try:
-            reply = ET.fromstring(device.get(interface_filter).data_xml)
+            self.logger.error(f'Failed to enable LLDP on {self.ip_address}: {str(e)}')
 
-            return [interface.find('.//{http://openconfig.net/yang/lldp}name').text for interface in reply.findall('.//{http://openconfig.net/yang/lldp}interface')]
-        except Exception as e:
-            self.logger.error(f'Failed to get interfaces from {ip_address}: {str(e)}')
-    
-    # Activate interfaces and enable LLDP on them
-    def enable_interfaces_lldp(self, device, ip_address):
-        interfaces = self.get_interfaces(device, ip_address)
+    # Get LLDP neighbors, and check for disabled (newly added) interfaces
+    def get_neighbors(self):
         
-        for interface in interfaces:
-            config = f'''
-                        <config xmlns="urn:ietf:params:xml:ns:netconf:base:1.0">
-                            <interfaces xmlns="http://openconfig.net/yang/interfaces">
-                                <interface>
-                                    <name>{interface}</name>
-                                    <config>
-                                        <enabled>true</enabled>
-                                    </config>
-                                </interface>
-                            </interfaces>
-                            <lldp xmlns="http://openconfig.net/yang/lldp">
-                            <interfaces>
-                                <interface>
-                                    <name>{interface}</name>
-                                    <config>
-                                        <enabled>true</enabled>
-                                    </config>
-                                </interface>
-                            </interfaces>
-                        </lldp>
-                        </config>
-                    '''
-            try:
-                device.edit_config(config=config)
-            except Exception as e:
-                self.logger.error(f'Failed to enable interface {interface} on {ip_address}: {str(e)}')
-
-    # Return a list of interface-neighbor pairs
-    def get_neighbors(self, ip_address):
-        device = self.devices[ip_address]
-
-        neighbors_filter = '''
+        # Note: Used two filters instead of one because a single filter doesn't get a respond 
+        #       from a virtual device in a different server than the server running this system.
+        #       Not sure what's the cause, but a possible theory is that the packet size is too big,
+        #       as the different servers are connected using VXLAN tunnels, which adds extra overhead to the packets.
+        
+        lldp_filter = '''
                     <filter xmlns="urn:ietf:params:xml:ns:netconf:base:1.0">
                         <lldp xmlns="http://openconfig.net/yang/lldp">
                             <interfaces>
                                 <interface>
                                     <name></name>
+                                    <state>
+                                        <enabled></enabled>
+                                    </state>
                                     <neighbors>
                                         <neighbor>
                                             <state>
@@ -159,41 +150,80 @@ class NetconfController(app_manager.RyuApp):
                         </lldp>
                     </filter>
                     '''
+        
+        interfaces_filter = '''
+                        <filter xmlns="urn:ietf:params:xml:ns:netconf:base:1.0">
+                            <interfaces xmlns="http://openconfig.net/yang/interfaces">
+                                <interface>
+                                    <name></name>
+                                    <state>
+                                        <enabled></enabled>
+                                    </state>
+                                </interface>
+                            </interfaces>
+                        </filter>
+                        '''
         try:
-            reply = ET.fromstring(device.get(neighbors_filter).data_xml)
+            lldp_reply = ET.fromstring(self.manager.get(lldp_filter).data_xml)
+            interfaces_reply = ET.fromstring(self.manager.get(interfaces_filter).data_xml)
 
-            neighbors = []
+            disabled_interfaces = []
 
-            for interface in reply.findall('.//{http://openconfig.net/yang/lldp}interface'):
+            for interface in lldp_reply.findall('.//{http://openconfig.net/yang/lldp}interface'):
                 interface_name = interface.find('.//{http://openconfig.net/yang/lldp}name').text
                 
+                # Same interface but in openconfig-interfaces tree, instead of openconfig-lldp
+                non_lldp_interface = interfaces_reply.find('.//{http://openconfig.net/yang/interfaces}interface[{http://openconfig.net/yang/interfaces}name="' + interface_name +'"]')
+
+                # Check if interface is disabled or LLDP is disabled
+                if not (non_lldp_interface.find('.//{http://openconfig.net/yang/interfaces}enabled').text == 'true'
+                    and interface.find('.//{http://openconfig.net/yang/lldp}enabled').text == 'true'):
+                    disabled_interfaces.append(interface_name)
+                    continue
+                
+                self.interfaces[interface_name] = []
+
                 for neighbor in interface.findall('.//{http://openconfig.net/yang/lldp}neighbor'):
                     neighbor_name = neighbor.find('.//{http://openconfig.net/yang/lldp}system-name').text
 
-                    neighbors.append((neighbor_name, interface_name))
-
-            return neighbors
-
+                    self.interfaces[interface_name].append(neighbor_name)
+                self.logger.debug(f'Found {len(self.interfaces[interface_name])} neighbors on {interface_name} ({self.ip_address})')
+            if len(disabled_interfaces) > 0:
+                self.logger.debug(f'Found {len(disabled_interfaces)} disabled interfaces on {self.ip_address}')
+                self.activate_interfaces(disabled_interfaces)
         except Exception as e:
-            self.logger.error(f'Failed to get neighbors from {ip_address}: {str(e)}')
-        
-    # Enable LLDP on device, globally and on interfaces
-    # Returns True if successful, False otherwise
-    def enable_lldp(self, ip_address):
-        device = self.devices[ip_address]
+            self.logger.error(f'Failed to get neighbors from {self.ip_address}: {str(e)}')
 
-        try:
-            self.enable_global_lldp(device, ip_address)
-            self.enable_interfaces_lldp(device, ip_address)
-            device.commit()
+    # Activate interfaces and enable LLDP
+    def activate_interfaces(self, disabled_interfaces):        
+        for interface in disabled_interfaces:
+            config = f'''
+                        <config xmlns="urn:ietf:params:xml:ns:netconf:base:1.0">
+                            <lldp xmlns="http://openconfig.net/yang/lldp">
+                                <interfaces>
+                                    <interface>
+                                        <name>{interface}</name>
+                                        <config>
+                                            <enabled>true</enabled>
+                                        </config>
+                                    </interface>
+                                </interfaces>
+                            </lldp>
+                            <interfaces xmlns="http://openconfig.net/yang/interfaces">
+                                <interface>
+                                    <name>{interface}</name>
+                                    <config>
+                                        <enabled>true</enabled>
+                                    </config>
+                                </interface>
+                            </interfaces>
+                        </config>
+                    '''
+            try:
+                self.manager.edit_config(config=config)
+                self.interfaces[interface] = []
+                self.logger.debug(f'Activated interface {interface} on {self.ip_address}')
+            except Exception as e:
+                self.logger.error(f'Failed to activate interface {interface} on {self.ip_address}: {str(e)}')
 
-            return True
-        except Exception as e:
-            self.logger.error(f'Failed to enable LLDP on {ip_address}: {str(e)}')
-            return False
-        
-    @set_ev_cls(RequestEnableLldp)
-    def request_enable_lldp(self, req):
-        result = self.enable_lldp(req.ip_address)
-
-        self.reply_to_request(req, ReplyEnableLldp(req.ip_address, result))
+        self.manager.commit()
