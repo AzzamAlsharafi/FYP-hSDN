@@ -10,8 +10,12 @@ from ryu.ofproto import ofproto_v1_3
 from scapy.layers.l2 import Ether
 from scapy.contrib import lldp
 
+from src.events import EventSdnTopology
+
 # Handles topology discovery for SDN (OpenFlow) devices
 class SdnTopologyDiscovery(app_manager.RyuApp):
+    _EVENTS = [EventSdnTopology]
+
     OFP_VERSIONS = [ofproto_v1_3.OFP_VERSION]
 
     def __init__(self, *args, **kwargs):
@@ -94,7 +98,7 @@ class SdnTopologyDiscovery(app_manager.RyuApp):
     # it works by installing a dummy flow with a hard timeout, which will trigger a flow removed event,
     # then the flow removed event handler will send the LLDP packets, and will call this function again,
     # thus creating an infinite loop with constant intervals.
-    # This function is also used to remove expired LLDP entries from the database, since it's already running periodically
+    # This function is also used to update LLDP timers, and send topology to TopologyManager, since it's already running periodically
     def start_lldp(self, datapath, timeout=15):
         ofp = datapath.ofproto
         ofp_parser = datapath.ofproto_parser
@@ -102,7 +106,7 @@ class SdnTopologyDiscovery(app_manager.RyuApp):
         instructions = [ofp_parser.OFPInstructionActions(ofp.OFPIT_APPLY_ACTIONS, [])]
         datapath.send_msg(ofp_parser.OFPFlowMod(datapath=datapath, hard_timeout=timeout, instructions=instructions, flags=ofp.OFPFF_SEND_FLOW_REM))
 
-        self.remove_expired_lldp()
+        self.update_lldp_database()
 
         self.logger.debug(f'Starting LLDP on {self.labels[datapath.id]} ({self.labels[datapath.id]}). Timeout: {timeout}')
 
@@ -137,7 +141,7 @@ class SdnTopologyDiscovery(app_manager.RyuApp):
         pkt = Ether(msg.data)
 
         if pkt.type == 0x88cc: # LLDP EtherType
-            system_name = pkt[lldp.LLDPDUSystemName].system_name
+            system_name = pkt[lldp.LLDPDUSystemName].system_name.decode()
             time_to_live = pkt[lldp.LLDPDUTimeToLive].ttl
 
             self.lldp[self.labels[datapath.id]][system_name] = {'port': port_in, 'ttl': time_to_live}
@@ -146,8 +150,8 @@ class SdnTopologyDiscovery(app_manager.RyuApp):
 
         self.logger.debug(f'Packet in received on {datapath.id} ({self.labels[datapath.id]}), port: {port_in}, packet: {pkt}')
         
-    # Remove expired LLDP entries from database
-    def remove_expired_lldp(self):
+    # Update LLDP timers, remove expired entries, and send topology to TopologyManager
+    def update_lldp_database(self):
         passed_time = time.time() - self.time
         
         # Stop function if it has been called less than 1 second ago
@@ -164,6 +168,15 @@ class SdnTopologyDiscovery(app_manager.RyuApp):
                     neighbors.pop(system_name)
 
                     self.logger.debug(f'LLDP entry expired, label: {label}, system name: {system_name}')
+        
+        self.send_topology()
+        
+        self.logger.debug(f'LLDP database updated, passed time: {passed_time} seconds')
+
+    # Send topology to TopologyManager
+    def send_topology(self):
+        topology = {'ports': self.ports, 'neighbors': self.lldp}
+        self.send_event_to_observers(EventSdnTopology(topology))
 
     # Craft LLDP packet
     def craft_lldp(self, label, port):
