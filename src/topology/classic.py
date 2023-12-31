@@ -23,7 +23,7 @@ class ClassicTopologyDiscovery(app_manager.RyuApp):
 
     # Continuously calls NetconfController to run topology discovery every 30 seconds
     def run(self):
-        interval = 30
+        interval = 15
         
         while True:
             start = time.time()

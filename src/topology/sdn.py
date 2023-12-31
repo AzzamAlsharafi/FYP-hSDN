@@ -46,7 +46,7 @@ class SdnTopologyDiscovery(app_manager.RyuApp):
         ofp_parser = datapath.ofproto_parser
 
         if ev.state == MAIN_DISPATCHER:
-            label = f'SDN-{self.label_count}'
+            label = f'S{self.label_count}'
             self.label_count += 1
 
             self.labels[datapath.id] = label
