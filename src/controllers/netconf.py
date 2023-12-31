@@ -48,19 +48,23 @@ class NetconfController(app_manager.RyuApp):
     
     # Runs discovery on all devices
     def discover_all(self):
-        topology = {} # {device_ip: interfaces}
+        all_interfaces = {}
+        all_neighbors = {}
 
         for device in self.devices:
             device.discover()
 
             if device.manager and device.lldp:
-                topology[device.hostname] = device.interfaces
+                all_interfaces[device.hostname] = device.interfaces
+                all_neighbors[device.hostname] = device.neighbors
             elif device.manager:
-                topology[device.hostname] = 'LLDP disabled'
+                all_interfaces[device.hostname] = 'LLDP disabled'
+                all_neighbors[device.hostname] = 'LLDP disabled'
             else:
-                topology[device.hostname] = 'Disconnected'
+                all_interfaces[device.hostname] = 'Disconnected'
+                all_neighbors[device.hostname] = 'Disconnected'
 
-        return topology
+        return {'interfaces': all_interfaces, 'neighbors': all_neighbors}
 
     @set_ev_cls(RequestNetconfDiscovery)
     def request_enable_lldp(self, req):
@@ -76,7 +80,8 @@ class Device:
         self.password = password # NETCONF password
         self.manager = None # NETCONF manager (ncclient)
         self.lldp = False # LLDP enabled or disabled
-        self.interfaces = {} # {interface_name: [neighbor_name, ...]}
+        self.interfaces = [] # [{'interface_name': 'Gi2', 'hw_addr': 'aa:aa:aa:aa:aa:aa'}]
+        self.neighbors = {} # {neighbor_name: interface_name, ...}
 
         self.logger = logging.getLogger(f'NetconfController-{self.ip_address}')
         self.logger.setLevel(logging.INFO)
@@ -101,10 +106,10 @@ class Device:
                 hostkey_verify=False,
                 timeout=10
             )
-            self.logger.debug(f'Established NETCONF connection with {self.ip_address}')
+            self.logger.debug(f'Established NETCONF connection with {self.ip_address} ({self.hostname})')
             self.enable_lldp()
         except Exception as e:
-            self.logger.error(f'Failed to establish NETCONF connection with {self.ip_address}: {str(e)}')
+            self.logger.error(f'Failed to establish NETCONF connection with {self.ip_address} ({self.hostname}): {str(e)}')
     
     # Enable LLDP on device
     def enable_lldp(self):
@@ -121,10 +126,10 @@ class Device:
             self.manager.edit_config(config=config)
             self.manager.commit()
             self.lldp = True
-            self.logger.debug(f'Enabled LLDP on {self.ip_address}')
+            self.logger.debug(f'Enabled LLDP on {self.ip_address} ({self.hostname})')
             self.get_neighbors()
         except Exception as e:
-            self.logger.error(f'Failed to enable LLDP on {self.ip_address}: {str(e)}')
+            self.logger.error(f'Failed to enable LLDP on {self.ip_address} ({self.hostname}): {str(e)}')
 
     # Get LLDP neighbors, and check for disabled (newly added) interfaces
     def get_neighbors(self):
@@ -164,6 +169,11 @@ class Device:
                                     <state>
                                         <enabled></enabled>
                                     </state>
+                                    <ethernet xmlns="http://openconfig.net/yang/interfaces/ethernet">
+                                        <state>
+                                            <mac-address></mac-address>
+                                        </state>
+                                    </ethernet>
                                 </interface>
                             </interfaces>
                         </filter>
@@ -174,11 +184,20 @@ class Device:
 
             disabled_interfaces = []
 
+            # Clears neighbors and interfaces
+            self.neighbors = {}
+            self.interfaces = []
+
             for interface in lldp_reply.findall('.//{http://openconfig.net/yang/lldp}interface'):
                 interface_name = interface.find('.//{http://openconfig.net/yang/lldp}name').text
                 
                 # Same interface but in openconfig-interfaces tree, instead of openconfig-lldp
                 non_lldp_interface = interfaces_reply.find('.//{http://openconfig.net/yang/interfaces}interface[{http://openconfig.net/yang/interfaces}name="' + interface_name +'"]')
+
+                mac_address = non_lldp_interface.find('.//{http://openconfig.net/yang/interfaces/ethernet}mac-address').text
+
+                # Add interface to interfaces
+                self.interfaces.append({'interface_name': interface_name, 'hw_addr': mac_address})
 
                 # Check if interface is disabled or LLDP is disabled
                 if not (non_lldp_interface.find('.//{http://openconfig.net/yang/interfaces}enabled').text == 'true'
@@ -186,18 +205,21 @@ class Device:
                     disabled_interfaces.append(interface_name)
                     continue
                 
-                self.interfaces[interface_name] = []
-
+                neighbor_count = 0
                 for neighbor in interface.findall('.//{http://openconfig.net/yang/lldp}neighbor'):
                     neighbor_name = neighbor.find('.//{http://openconfig.net/yang/lldp}system-name').text
 
-                    self.interfaces[interface_name].append(neighbor_name)
-                self.logger.debug(f'Found {len(self.interfaces[interface_name])} neighbors on {interface_name} ({self.ip_address})')
+                    neighbor_count += 1
+
+                    # Add neighbor to neighbors
+                    self.neighbors[neighbor_name] = interface_name
+
+                self.logger.debug(f'Found {neighbor_count} neighbors on {interface_name} {self.ip_address} ({self.hostname})')
             if len(disabled_interfaces) > 0:
-                self.logger.debug(f'Found {len(disabled_interfaces)} disabled interfaces on {self.ip_address}')
+                self.logger.debug(f'Found {len(disabled_interfaces)} disabled interfaces on {self.ip_address} ({self.hostname})')
                 self.activate_interfaces(disabled_interfaces)
         except Exception as e:
-            self.logger.error(f'Failed to get neighbors from {self.ip_address}: {str(e)}')
+            self.logger.error(f'Failed to get neighbors from {self.ip_address}  ({self.hostname}): {str(e)}')
 
     # Activate interfaces and enable LLDP
     def activate_interfaces(self, disabled_interfaces):        
@@ -224,11 +246,33 @@ class Device:
                             </interfaces>
                         </config>
                     '''
+            
+            filter = f'''
+                        <filter xmlns="urn:ietf:params:xml:ns:netconf:base:1.0">
+                            <interfaces xmlns="http://openconfig.net/yang/interfaces">
+                                <interface>
+                                    <name>{interface}</name>
+                                    <ethernet xmlns="http://openconfig.net/yang/interfaces/ethernet">
+                                        <state>
+                                            <mac-address></mac-address>
+                                        </state>
+                                    </ethernet>
+                                </interface>
+                            </interfaces>
+                        </filter>        
+                    '''
+
             try:
                 self.manager.edit_config(config=config)
-                self.interfaces[interface] = []
-                self.logger.debug(f'Activated interface {interface} on {self.ip_address}')
+
+                interfaces_reply = ET.fromstring(self.manager.get(filter).data_xml)
+
+                mac_address = interfaces_reply.find('.//{http://openconfig.net/yang/interfaces/ethernet}mac-address').text
+
+                self.interfaces.append({'interface_name': interface, 'hw_addr': mac_address})
+
+                self.logger.debug(f'Activated interface {interface} on {self.ip_address} ({self.hostname})')
             except Exception as e:
-                self.logger.error(f'Failed to activate interface {interface} on {self.ip_address}: {str(e)}')
+                self.logger.error(f'Failed to activate interface {interface} on {self.ip_address} ({self.hostname}): {str(e)}')
 
         self.manager.commit()
