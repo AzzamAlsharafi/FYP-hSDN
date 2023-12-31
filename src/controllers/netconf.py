@@ -37,10 +37,14 @@ class NetconfController(app_manager.RyuApp):
                 elif line_count == 1:
                     password = line.split('=')[1].strip()
                     line_count += 1
-                elif re.match(r'^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$', line): # Regex for IPv4 address
-                    self.devices.append(Device(line, user, password))
                 else:
-                    self.logger.error(f'Invalid IP address: {line}')
+                    split = line.split(' ')
+                    address = split[0]
+                    host = split[1]
+                    if re.match(r'^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$', address): # Regex for IPv4 address
+                        self.devices.append(Device(address, host, user, password))
+                    else:
+                        self.logger.error(f'Invalid device configuration: {line}')
     
     # Runs discovery on all devices
     def discover_all(self):
@@ -50,11 +54,11 @@ class NetconfController(app_manager.RyuApp):
             device.discover()
 
             if device.manager and device.lldp:
-                topology[device.ip_address] = device.interfaces
+                topology[device.hostname] = device.interfaces
             elif device.manager:
-                topology[device.ip_address] = 'LLDP disabled'
+                topology[device.hostname] = 'LLDP disabled'
             else:
-                topology[device.ip_address] = 'Disconnected'
+                topology[device.hostname] = 'Disconnected'
 
         return topology
 
@@ -65,8 +69,9 @@ class NetconfController(app_manager.RyuApp):
 # TODO: Better support and handling for dynamic topology changes (device get enabled, disabled, etc...)
 #       Way for detecting device shutdown
 class Device:
-    def __init__(self, ip_address, user, password):
+    def __init__(self, ip_address, hostname, user, password):
         self.ip_address = ip_address
+        self.hostname = hostname # Hostname of device
         self.user = user # NETCONF username
         self.password = password # NETCONF password
         self.manager = None # NETCONF manager (ncclient)

@@ -5,8 +5,9 @@
 user = USERNAME
 pass = PASSWORD
 
-# Each line represents a single device. 
-192.168.1.11
-192.168.1.12
-192.168.1.21
-192.168.1.22
+# Each line represents a single device.
+# IPv4 address followed by hostname. Separated by a single space.
+192.168.1.11 R1
+192.168.1.12 R2
+192.168.1.21 R3
+192.168.1.22 R4
