@@ -111,16 +111,17 @@ class TopologyManager(app_manager.RyuApp):
         try:
             _ = netconf_neighbors[neighbor][label]
             return 'netconf'
-        except KeyError:
+        except:
             try:
                 _ = sdn_neighbors[neighbor][label]
                 return 'sdn'
-            except KeyError:
+            except:
                 self.logger.debug(f'Unidirectional neighbors found, hostname: {label}, neighbor: {neighbor}')
                 return None
 
     # Print topology in a readable format
     def print_topo(self):
+        self.logger.info('='*150)
         self.logger.info('Topology:')
         self.logger.info(f'\tDevices ({len(self.devices)}):')
         for device in self.devices:
@@ -131,4 +132,5 @@ class TopologyManager(app_manager.RyuApp):
         self.logger.info(f'\tLinks ({len(self.links)}):')
         for link in self.links:
             self.logger.info(f'\t\t{link}')
+        self.logger.info('='*150)
         self.logger.info('')

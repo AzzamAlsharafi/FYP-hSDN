@@ -58,11 +58,8 @@ class NetconfController(app_manager.RyuApp):
                 all_interfaces[device.hostname] = device.interfaces
                 all_neighbors[device.hostname] = device.neighbors
             elif device.manager:
-                all_interfaces[device.hostname] = 'LLDP disabled'
-                all_neighbors[device.hostname] = 'LLDP disabled'
-            else:
-                all_interfaces[device.hostname] = 'Disconnected'
-                all_neighbors[device.hostname] = 'Disconnected'
+                all_interfaces[device.hostname] = ['LLDP disabled']
+                all_neighbors[device.hostname] = ['LLDP disabled']
 
         return {'interfaces': all_interfaces, 'neighbors': all_neighbors}
 
@@ -70,8 +67,6 @@ class NetconfController(app_manager.RyuApp):
     def request_enable_lldp(self, req):
         self.reply_to_request(req, ReplyNetconfDiscovery(self.discover_all()))
 
-# TODO: Better support and handling for dynamic topology changes (device get enabled, disabled, etc...)
-#       Way for detecting device shutdown
 class Device:
     def __init__(self, ip_address, hostname, user, password):
         self.ip_address = ip_address
@@ -109,7 +104,8 @@ class Device:
             self.logger.debug(f'Established NETCONF connection with {self.ip_address} ({self.hostname})')
             self.enable_lldp()
         except Exception as e:
-            self.logger.error(f'Failed to establish NETCONF connection with {self.ip_address} ({self.hostname}): {str(e)}')
+            # Use debug instead of error, as it's expected that some devices will be unreachable (e.g. shutdown)
+            self.logger.debug(f'Failed to establish NETCONF connection with {self.ip_address} ({self.hostname}): {str(e)}')
     
     # Enable LLDP on device
     def enable_lldp(self):
@@ -129,7 +125,9 @@ class Device:
             self.logger.debug(f'Enabled LLDP on {self.ip_address} ({self.hostname})')
             self.get_neighbors()
         except Exception as e:
-            self.logger.error(f'Failed to enable LLDP on {self.ip_address} ({self.hostname}): {str(e)}')
+            # Assume any exception means device got disconnected
+            self.manager = None
+            self.logger.debug(f'Failed to enable LLDP on {self.ip_address} ({self.hostname}): {str(e)}')
 
     # Get LLDP neighbors, and check for disabled (newly added) interfaces
     def get_neighbors(self):
@@ -219,7 +217,9 @@ class Device:
                 self.logger.debug(f'Found {len(disabled_interfaces)} disabled interfaces on {self.ip_address} ({self.hostname})')
                 self.activate_interfaces(disabled_interfaces)
         except Exception as e:
-            self.logger.error(f'Failed to get neighbors from {self.ip_address}  ({self.hostname}): {str(e)}')
+            # Assume any exception means device is disconnected
+            self.manager = None
+            self.logger.debug(f'Failed to get neighbors from {self.ip_address} ({self.hostname}): {str(e)}')
 
     # Activate interfaces and enable LLDP
     def activate_interfaces(self, disabled_interfaces):        
