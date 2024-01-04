@@ -78,10 +78,15 @@ class SdnTopologyDiscovery(app_manager.RyuApp):
     def port_desc_reply_handler(self, ev):
         msg = ev.msg
         datapath = msg.datapath
+        ofp = datapath.ofproto
         
         ports = []
         for p in msg.body:
             p.port_no, p.hw_addr
+
+            # Skip OpenFlow local port
+            if p.port_no == ofp.OFPP_LOCAL:
+                continue
 
             ports.append({'port_no': p.port_no, 'hw_addr': p.hw_addr})
 
