@@ -23,3 +23,9 @@ class EventSdnTopology(EventBase):
     def __init__(self, topology):
         super(EventSdnTopology, self).__init__()
         self.topology = topology
+
+# Event containing policies
+class EventPolicies(EventBase):
+    def __init__(self, policies):
+        super(EventPolicies, self).__init__()
+        self.policies = policies

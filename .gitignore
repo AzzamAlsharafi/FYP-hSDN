@@ -3,4 +3,4 @@ ryu
 __pycache__
 config/*
 
-!config/netconf.txt.example
+!config/*.example
