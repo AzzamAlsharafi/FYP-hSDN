@@ -24,8 +24,9 @@ class SdnTopologyDiscovery(app_manager.RyuApp):
         self.logger.setLevel(logging.INFO)
 
         # Mapping datapath ID to label
-        self.label_count = 0
         self.labels = {}
+        
+        self.load_all_labels()
         
         self.ports = {} # {label: [{'port_no': 1, 'hw_addr': 'aa:aa:aa:aa:aa:aa'}, ...]
         
@@ -36,7 +37,27 @@ class SdnTopologyDiscovery(app_manager.RyuApp):
 
         # Stores current time. Used for LLDP timeout
         self.time = time.time()
-    
+
+    # Load SDN devices labels from previous sessions
+    def load_all_labels(self):
+        labels = {}
+        count = 0
+
+        try:
+            with open('config/sdn.txt', 'r') as file:
+                lines = file.read().splitlines()
+                for line in lines:
+                    split = line.split(':')
+                    labels[int(split[0])] = split[1]
+                count = len(lines)
+        except FileNotFoundError:
+            self.logger.debug('config/sdn.txt does not exist.')
+        except:
+            self.logger.error('Error loading from config/sdn.txt')
+        
+        self.all_labels = labels
+        self.labels_count = count
+
     # Listener for new switch connections. Add them to topology, and start LLDP discovery
     # Also used for removing disconnected switches from topology
     @set_ev_cls(ofp_event.EventOFPStateChange, [MAIN_DISPATCHER, DEAD_DISPATCHER])
@@ -45,11 +66,29 @@ class SdnTopologyDiscovery(app_manager.RyuApp):
         ofp = datapath.ofproto
         ofp_parser = datapath.ofproto_parser
 
+        # TODO: What happens when SDN device label is changed while the network is running (using GUI)?
+        #       What become of the old LLDP relationships? And how will that affect the flow of the program?
         if ev.state == MAIN_DISPATCHER:
-            label = f'S{self.label_count}'
-            self.label_count += 1
+            if datapath.id in self.all_labels:
+                label = self.all_labels[datapath.id]
 
-            self.labels[datapath.id] = label
+                self.labels[datapath.id] = label
+
+                self.logger.debug(f'Found existing SDN device: {datapath.id} ({label})')
+            else:
+                label = f'S{self.labels_count}'
+                self.labels_count += 1
+
+                self.labels[datapath.id] = label
+                self.all_labels[datapath.id] = label
+
+                self.logger.debug(f'Found new SDN device: {datapath.id} ({label})')
+
+                try:
+                    with open('config/sdn.txt', 'a') as file:
+                        file.write(f'{datapath.id}:{label}\n')
+                except:
+                    self.logger.error(f'Error writing {label} to config/sdn.txt')
 
             self.ports[label] = []
 
