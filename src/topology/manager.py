@@ -3,10 +3,12 @@ import logging
 from ryu.base import app_manager
 from ryu.controller.handler import set_ev_cls
 
-from src.events import EventNetconfTopology, EventSdnTopology
+from src.events import EventNetconfTopology, EventSdnTopology, EventTopology
 
 
 class TopologyManager(app_manager.RyuApp):
+    _EVENTS = [EventTopology]
+
     def __init__(self, *args, **kwargs):
         super(TopologyManager, self).__init__(*args, **kwargs)
 
@@ -73,7 +75,7 @@ class TopologyManager(app_manager.RyuApp):
                 link = (label, neighbor)
                 self.add_link(link, 'sdn', netconf_neighbors, sdn_neighbors)
 
-        self.print_topo()
+        self.send_topo()
 
         self.logger.debug(f'Topology updated: {self.devices}\n{self.links}')
     
@@ -134,3 +136,7 @@ class TopologyManager(app_manager.RyuApp):
             self.logger.info(f'\t\t{link}')
         self.logger.info('='*150)
         self.logger.info('')
+
+    # Send topology to ConfigurationGenerator
+    def send_topo(self):
+        self.send_event_to_observers(EventTopology(self.devices, self.links))

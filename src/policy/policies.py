@@ -1,4 +1,5 @@
 from enum import Enum
+import re
 
 # Define policies classes
 
@@ -24,10 +25,19 @@ class GlobalPolicy(Policy):
     def __str__(self):
         return f'GlobalPolicy: {self.command}'
 
-# Address policy. Used to configure an address on interface on a device. TODO
+# Address policy. Used to configure an address on interface on a device.
 class AddressPolicy(Policy):
     def __init__(self, device, interface, address):
         super(AddressPolicy, self).__init__('address')
+        
+        try:
+            interface = int(interface)
+            split = address.split('/') # Split address and mask
+            mask = int(split[1])
+            assert re.match(r'^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$', split[0]) # IPv4 address regex
+        except Exception:
+            raise ValueError(f'Invalid input values')
+        
         self.device = device
         self.interface = interface
         self.address = address

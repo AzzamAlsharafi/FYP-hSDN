@@ -13,7 +13,7 @@ class PolicyManager(app_manager.RyuApp):
     def __init__(self, *args, **kwargs):
         super(PolicyManager, self).__init__(*args, **kwargs)
 
-        self.logger.setLevel(logging.DEBUG)
+        self.logger.setLevel(logging.INFO)
 
         self.policies = []
     

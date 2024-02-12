@@ -29,3 +29,10 @@ class EventPolicies(EventBase):
     def __init__(self, policies):
         super(EventPolicies, self).__init__()
         self.policies = policies
+
+# Event containing topology
+class EventTopology(EventBase):
+    def __init__(self, devices, links):
+        super(EventTopology, self).__init__()
+        self.devices = devices
+        self.links = links
