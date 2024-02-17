@@ -6,9 +6,6 @@
 # Policies are processed in order.
 
 # Types of policies:
-# - global: global policies that affects the entire network.
-#       Currently, one global policy is supported: 'routing'.
-#       Configures routing/reachability between all devices in the network.
 # - address: configure IPv4 address on interface
 #       address [device] [interface id] [IPv4 address]
 # - flow: defines a 'traffic flow', which is a combination of 5 values:
@@ -26,7 +23,6 @@
 #       (can disable all interfaces using 'all')
 #       Disabled interfaces will be treated as non-existent
 #       disable [device] [interface id]
-global routing
 address B1a 0 192.168.1.1/24
 flow local_tcp 192.168.0.0/16 * TCP * *
 block B1a local_tcp

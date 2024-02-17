@@ -1,4 +1,3 @@
-from enum import Enum
 import re
 
 # Define policies classes
@@ -7,23 +6,6 @@ import re
 class Policy:
     def __init__(self, type):
         self.type = type
-
-# Enum of available global commands
-class GlobalCommand(Enum):
-    ROUTING = 1 # When enabled, routing/reachability will be configured between all devices in the network.
-
-# Global policy. Used to enable a global command.
-class GlobalPolicy(Policy):
-    def __init__(self, command):
-        super(GlobalPolicy, self).__init__('global')
-        
-        if command == 'routing':
-            self.command = GlobalCommand.ROUTING
-        else:
-            raise ValueError(f'Invalid global command: {command}')
-
-    def __str__(self):
-        return f'GlobalPolicy: {self.command}'
 
 # Address policy. Used to configure an address on interface on a device.
 class AddressPolicy(Policy):

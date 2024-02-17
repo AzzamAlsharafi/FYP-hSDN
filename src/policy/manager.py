@@ -2,7 +2,7 @@ import logging
 
 from ryu.base import app_manager
 
-from policies import GlobalPolicy, AddressPolicy, FlowPolicy, BlockPolicy, RoutePolicy, ZonePolicy, DisablePolicy
+from policies import AddressPolicy, FlowPolicy, BlockPolicy, RoutePolicy, ZonePolicy, DisablePolicy
 
 from src.events import EventPolicies
 
@@ -36,9 +36,7 @@ class PolicyManager(app_manager.RyuApp):
                 words = line.split(' ')
                 
                 try:
-                    if words[0] == 'global':
-                        self.policies.append(GlobalPolicy(*words[1:]))
-                    elif words[0] == 'address':
+                    if words[0] == 'address':
                         self.policies.append(AddressPolicy(*words[1:]))
                     elif words[0] == 'flow':
                         self.policies.append(FlowPolicy(*words[1:]))
