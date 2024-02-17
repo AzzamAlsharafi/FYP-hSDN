@@ -21,6 +21,14 @@ class ConfigurationGenerator(app_manager.RyuApp):
 
         # Dictionary of devices configurations: {'C1': [conf1, conf2, conf3, ...], ...}
         self.configurations = {}
+
+        # Lists of address policies for each device. 
+        # Contains valid policies (based on topology), and use interface name instead of ID.
+        # {'C1': [(address, interface), ...], 'C2': [...], ...}
+        self.addresses = {}
+
+        # Keep track of the number of used link networks
+        self.used_link_networks = 0
     
     # Listens for policies from PolicyManager
     @set_ev_cls(EventPolicies)
@@ -49,38 +57,174 @@ class ConfigurationGenerator(app_manager.RyuApp):
         
         self.time = time.time()
 
+        self.addresses = {}
         self.configurations = {}
 
         for policy in self.policies:
             self.apply_policy(policy)
 
+        self.global_routing()
+
         self.logger.debug(f'Generated configurations: {self.configurations}')
         
-    # Apply policy and generate configurations for it
+    # Apply policy and do some processing
     def apply_policy(self, policy):
         if policy.type == 'address':
-            device = policy.device
-            interface = policy.interface
-
-            d = self.get_device(device)
-
-            if d and (len(d['ports']) > interface):
-                if not device in self.configurations:
-                    self.configurations[device] = []
-                
-                port = d['ports'][interface]
-
-                if d['type'] == 'Classic':
-                    port = port['interface_name']
-                else:
-                    port = port['port_no']
-
-                conf = f'address {port} {policy.address}'
-                self.configurations[device].append(conf)
-
-                self.logger.debug(f'Generated configuration for {device}: {conf}')
-            else:
-                self.logger.debug(f'Skipped AddressPolicy: {policy.device} {policy.interface} {policy.address}')
+            self.apply_address_policy(policy)
     
+    def apply_address_policy(self, policy):
+        device = policy.device
+        interface = policy.interface
+
+        d = self.get_device(device)
+
+        if d and (len(d['ports']) > interface):            
+            port = d['ports'][interface]
+
+            if d['type'] == 'Classic':
+                port = port['interface_name']
+            else:
+                port = port['port_no']
+
+            add = (policy.address, port)
+            conf = f'address {port} {policy.address}'
+
+            self.append_dict_list(self.addresses, device, add)
+            self.append_dict_list(self.configurations, device, conf)
+
+            self.logger.debug(f'Added AddressPolicy for {device}: {add}')
+        else:
+            self.logger.debug(f'Skipped AddressPolicy: {policy.device} {policy.interface} {policy.address}')
+
+    # Run global routing algorithm based on collected address policies
+    def global_routing(self):
+        # Addresses configurations for links
+        for link in self.links:
+            ((device1, port1), (device2, port2)) = link
+            (add1, add2) = self.next_link_addresses()
+
+            conf1 = f'address {port1} {add1}'
+            conf2 = f'address {port2} {add2}'
+
+            self.append_dict_list(self.configurations, device1, conf1)
+            self.append_dict_list(self.configurations, device2, conf2)
+        
+        # Route configurations for every device to all address policies interfaces
+        for device in self.devices:
+            # TODO: this runs dijkstra for every device everytime.
+            # It should be optimized to run only once for every topology change.
+            distances = self.run_dijkstra(device['name'])
+            
+            for policy_device in self.addresses:
+                if device['name'] == policy_device: # Skip device if it's the same as the policy device
+                    continue
+                
+                # Find next hop device to policy device
+                next_hop = self.find_next_hop_device(distances, policy_device)
+                if next_hop:
+                    
+                    # If next hop is the same as the device, then link is direct
+                    # and next hop is the policy device
+                    if next_hop == device['name']:
+                        next_hop = policy_device
+
+                    # Find exit interface to next hop device
+                    exit_interface = self.get_exit_interface(device['name'], next_hop)
+                    if exit_interface:
+                        
+                        # Add route configuration for every address policy of policy device
+                        for (address, _) in self.addresses[policy_device]:
+                            conf = f'route {address} {exit_interface}'
+                            self.append_dict_list(self.configurations, device['name'], conf)
+
+    # Returns next available IPv4 addresses from links subnet.
+    # TODO: Links subnet can be configured by user. Use 192.168.99.0/24 for now
+    def next_link_addresses(self):
+        add1 = f'192.168.99.{(self.used_link_networks * 4) + 1}/30'
+        add2 = f'192.168.99.{(self.used_link_networks * 4) + 2}/30'
+
+        self.used_link_networks += 1
+
+        return (add1, add2)
+    
+    # Find next hop device to a device based on Dijkstra's distances table
+    def find_next_hop_device(self, distances, device):
+        (distance, reach_by) = distances[device]
+
+        while distance > 2 and reach_by is not None:
+            (distance, reach_by) = distances[reach_by]
+        
+        return reach_by
+
+    # Find exit interface from device to another device
+    def get_exit_interface(self, device, next_hop):
+        for link in self.links:
+            ((device1, port1), (device2, port2)) = link
+
+            if device1 == device and device2 == next_hop:
+                return port1
+            elif device2 == device and device1 == next_hop:
+                return port2
+        
+        return None
+
+    # Run Dijkstra's algorithm for a device
+    def run_dijkstra(self, device):
+        # Dijkstra's distances table
+        # {'C1': (0, None), 'C2': (5, 'C1'), ...}
+        distances = {}
+
+        # List of unvisited nodes
+        unvisited = [device['name'] for device in self.devices]
+
+        # Initialize distances
+        for u in unvisited:
+            distances[u] = (float('inf'), None)
+
+        # Set distance to self to 0
+        distances[device] = (0, None)
+
+        # Run Dijkstra's algorithm
+        while unvisited:
+            # Find node with smallest distance
+            minimum = min(unvisited, key=lambda x: distances[x][0])
+
+            neighbours = self.get_neighbours(minimum)
+
+            # Update distances of unvisited neighbours
+            for n in neighbours:
+                if n in unvisited:
+                    distance = distances[minimum][0] + 1
+
+                    if distance < distances[n][0]:
+                        distances[n] = (distance, minimum)
+            
+            # Mark node as visited
+            unvisited.remove(minimum)
+        
+        return distances
+
+    # Returns list of neighbours for a device
+    def get_neighbours(self, device):
+        neighbours = []
+        for link in self.links:
+            ((device1, _), (device2, _)) = link
+            
+
+            if device1 == device:
+                neighbours.append(device2)
+            elif device2 == device:
+                neighbours.append(device1)
+        
+        return neighbours
+
+    # Returns device from list by name
     def get_device(self, name):
         return next((device for device in self.devices if device["name"] == name), None)
+    
+    # Append item to a list in a dictionary
+    def append_dict_list(self, dict, key, item):
+        if key in dict:
+            dict[key].append(item)
+        else:
+            dict[key] = [item]
