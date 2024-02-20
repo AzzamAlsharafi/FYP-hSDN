@@ -29,6 +29,10 @@ class ConfigurationGenerator(app_manager.RyuApp):
 
         # Keep track of the number of used link networks
         self.used_link_networks = 0
+
+        # List of links with addresses
+        # [(('C1', 1, '192.168...'), ('C2', 1, '192.168...')), ...]
+        self.links_adds = []
     
     # Listens for policies from PolicyManager
     @set_ev_cls(EventPolicies)
@@ -99,9 +103,14 @@ class ConfigurationGenerator(app_manager.RyuApp):
     # Run global routing algorithm based on collected address policies
     def global_routing(self):
         # Addresses configurations for links
+        self.used_link_networks = 0
+        self.links_adds = []
+
         for link in self.links:
             ((device1, port1), (device2, port2)) = link
             (add1, add2) = self.next_link_addresses()
+
+            self.links_adds.append(((device1, port1, add1), (device2, port2, add2)))
 
             conf1 = f'address {port1} {add1}'
             conf2 = f'address {port2} {add2}'
@@ -128,13 +137,13 @@ class ConfigurationGenerator(app_manager.RyuApp):
                     if next_hop == device['name']:
                         next_hop = policy_device
 
-                    # Find exit interface to next hop device
-                    exit_interface = self.get_exit_interface(device['name'], next_hop)
+                    # Find exit interface and next hop address
+                    (exit_interface, next_hop_add) = self.get_exit_interface_next_hop(device['name'], next_hop)
                     if exit_interface:
                         
                         # Add route configuration for every address policy of policy device
                         for (address, _) in self.addresses[policy_device]:
-                            conf = f'route {address} {exit_interface}'
+                            conf = f'route {address} {exit_interface} {next_hop_add}'
                             self.append_dict_list(self.configurations, device['name'], conf)
 
     # Returns next available IPv4 addresses from links subnet.
@@ -156,17 +165,20 @@ class ConfigurationGenerator(app_manager.RyuApp):
         
         return reach_by
 
-    # Find exit interface from device to another device
-    def get_exit_interface(self, device, next_hop):
-        for link in self.links:
-            ((device1, port1), (device2, port2)) = link
+    # Find exit interface and next hop address from device to another device
+    def get_exit_interface_next_hop(self, device, next_hop):
+        self.logger.info(f'Getting exit interface and next hop address from {device} to {next_hop}')
+        self.logger.info(f'Links ({len(self.links_adds)}): {self.links_adds}')
+
+        for link in self.links_adds: # Assume link must have already been configured addresses
+            ((device1, port1, add1), (device2, port2, add2)) = link
 
             if device1 == device and device2 == next_hop:
-                return port1
+                return (port1, add2)
             elif device2 == device and device1 == next_hop:
-                return port2
+                return (port2, add1)
         
-        return None
+        return (None, None)
 
     # Run Dijkstra's algorithm for a device
     def run_dijkstra(self, device):
