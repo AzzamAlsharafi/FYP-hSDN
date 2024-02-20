@@ -167,9 +167,6 @@ class ConfigurationGenerator(app_manager.RyuApp):
 
     # Find exit interface and next hop address from device to another device
     def get_exit_interface_next_hop(self, device, next_hop):
-        self.logger.info(f'Getting exit interface and next hop address from {device} to {next_hop}')
-        self.logger.info(f'Links ({len(self.links_adds)}): {self.links_adds}')
-
         for link in self.links_adds: # Assume link must have already been configured addresses
             ((device1, port1, add1), (device2, port2, add2)) = link
 
