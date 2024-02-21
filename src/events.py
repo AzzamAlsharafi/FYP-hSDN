@@ -36,3 +36,21 @@ class EventTopology(EventBase):
         super(EventTopology, self).__init__()
         self.devices = devices
         self.links = links
+
+# Event containing classic devices configurations
+class EventClassicConfigurations(EventBase):
+    def __init__(self, configurations):
+        super(EventClassicConfigurations, self).__init__()
+        self.configurations = configurations
+
+# Event containing SDN devices configurations
+class EventSdnConfigurations(EventBase):
+    def __init__(self, configurations):
+        super(EventSdnConfigurations, self).__init__()
+        self.configurations = configurations
+
+# Event containing NETCONF devices configurations
+class EventNetconfConfigurations(EventBase):
+    def __init__(self, configurations):
+        super(EventNetconfConfigurations, self).__init__()
+        self.configurations = configurations

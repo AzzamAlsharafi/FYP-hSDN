@@ -6,7 +6,7 @@ from ryu.base import app_manager
 from ncclient import manager
 from ryu.controller.handler import set_ev_cls
 
-from src.events import RequestNetconfDiscovery, ReplyNetconfDiscovery
+from src.events import RequestNetconfDiscovery, ReplyNetconfDiscovery, EventNetconfConfigurations
 
 # Responsible for managing NETCONF communication with NETCONF devices
 class NetconfController(app_manager.RyuApp):
@@ -67,6 +67,21 @@ class NetconfController(app_manager.RyuApp):
     def request_enable_lldp(self, req):
         self.reply_to_request(req, ReplyNetconfDiscovery(self.discover_all()))
 
+    # Configure NETCONF device with received configurations
+    @set_ev_cls(EventNetconfConfigurations)
+    def configure_devices(self, ev):
+        configurations = ev.configurations
+
+        self.logger.info(f'Configuring devices {configurations}')
+
+        for device_name in configurations:
+            device = next((d for d in self.devices if d.hostname == device_name), None)
+
+            if device and device.manager:
+                for conf in configurations[device_name]:
+                    device.configure(conf)
+
+
 class Device:
     def __init__(self, ip_address, hostname, user, password):
         self.ip_address = ip_address
@@ -77,6 +92,8 @@ class Device:
         self.lldp = False # LLDP enabled or disabled
         self.interfaces = [] # [{'interface_name': 'Gi2', 'hw_addr': 'aa:aa:aa:aa:aa:aa'}]
         self.neighbors = {} # {neighbor_name: interface_name, ...}
+
+        self.configurations = [] # List of applied device configurations
 
         self.logger = logging.getLogger(f'NetconfController-{self.ip_address}')
         self.logger.setLevel(logging.INFO)
@@ -89,7 +106,34 @@ class Device:
             self.enable_lldp()
         else: # LLDP enabled, discover neighbors
             self.get_neighbors()
-    
+
+    # TODO: handle chaning configurations. Deconfigure old and configure new. (?)
+    # Configure device with received configuration
+    def configure(self, conf):
+        if conf in self.configurations:
+            return # Configuration already applied
+
+        split = conf.split(' ')
+
+        if split[0] == 'address':
+            interface = split[1]
+            (address, prefix) = split[2].split('/')
+
+            if self.configure_address(interface, address, prefix):
+                self.configurations.append(conf) # Add successful configuration
+
+        elif split[0] == 'route':
+            (address, prefix) = split[1].split('/')
+            destination = self.get_network_address(address, prefix)
+
+            interface = split[2]
+            (next_hop, next_hop_prefix) = split[3].split('/')
+
+            if self.configure_route(destination, prefix, interface, next_hop, next_hop_prefix):
+                self.configurations.append(conf) # Add successful configuration
+        else:
+            self.logger.error(f'Invalid configuration for device {self.hostname}: {conf}')
+
     # Establish NETCONF connection with device
     def connect(self):
         try:
@@ -276,3 +320,113 @@ class Device:
                 self.logger.error(f'Failed to activate interface {interface} on {self.ip_address} ({self.hostname}): {str(e)}')
 
         self.manager.commit()
+    
+    # Configure address on interface
+    def configure_address(self, interface, address, prefix):
+        config = f'''
+                    <config xmlns="urn:ietf:params:xml:ns:netconf:base:1.0">
+                        <interfaces xmlns="http://openconfig.net/yang/interfaces">
+                            <interface>
+                                <name>{interface}</name>
+                                <subinterfaces>
+                                    <subinterface>
+                                        <index>0</index>
+                                        <ipv4 xmlns="http://openconfig.net/yang/interfaces/ip">
+                                            <addresses>
+                                                <address>
+                                                    <ip>{address}</ip>
+                                                    <config>
+                                                        <ip>{address}</ip>
+                                                        <prefix-length>{prefix}</prefix-length>
+                                                    </config>
+                                                </address>
+                                            </addresses>
+                                        </ipv4>
+                                    </subinterface>
+                                </subinterfaces>
+                            </interface>
+                        </interfaces>
+                    </config>
+                '''
+        
+        try:
+            self.manager.edit_config(config=config)
+            self.manager.commit()
+
+            self.logger.debug(f'Configured address {address}/{prefix} on {interface} on {self.ip_address} ({self.hostname})')
+
+            return True
+        except Exception as e:
+            self.logger.error(f'Failed to configure address {address}/{prefix} on {interface} on {self.ip_address} ({self.hostname}): {str(e)}')
+
+            return False
+    
+    # Configure route on device
+    def configure_route(self, destination, prefix, interface, next_hop, next_hop_prefix):
+        config = f'''
+                    <config xmlns="urn:ietf:params:xml:ns:netconf:base:1.0">
+                    <network-instances xmlns="http://openconfig.net/yang/network-instance">
+                        <network-instance>
+                            <name>default</name>
+                            <protocols>
+                                <protocol>
+                                    <identifier xmlns:oc-pol-types="http://openconfig.net/yang/policy-types">
+                                        oc-pol-types:STATIC</identifier>
+                                    <name>DEFAULT</name>
+                                    <static-routes>
+                                        <static>
+                                            <prefix>{destination}/{prefix}</prefix>
+                                            <config>
+                                                <prefix>{destination}/{prefix}</prefix>
+                                            </config>
+                                            <next-hops>
+                                                <next-hop>
+                                                    <index>{interface}_{next_hop}</index>
+                                                    <config>
+                                                        <index>{interface}_{next_hop}</index>
+                                                        <next-hop>{next_hop}</next-hop>
+                                                        <metric>1</metric>
+                                                    </config>
+                                                    <interface-ref>
+                                                        <config>
+                                                            <interface>{interface}</interface>
+                                                        </config>
+                                                    </interface-ref>
+                                                </next-hop>
+                                            </next-hops>
+                                        </static>
+                                    </static-routes>
+                                </protocol>
+                            </protocols>
+                        </network-instance>
+                    </network-instances>
+                </config>
+            '''
+        
+        try:
+            self.manager.edit_config(config=config)
+            self.manager.commit()
+
+            self.logger.debug(f'Configured route {destination}/{prefix} via {next_hop} on {interface} on {self.ip_address} ({self.hostname})')
+
+            return True
+        except Exception as e:
+            self.logger.error(f'Failed to configure route {destination}/{prefix} via {next_hop} on {interface} on {self.ip_address} ({self.hostname}): {str(e)}')
+
+            return False
+    
+    # Get network address from host address and prefix
+    def get_network_address(self, address, prefix):
+        address = address.split('.')
+        prefix = int(prefix)
+
+        # Convert address to binary
+        address = ''.join(format(int(octet), '08b') for octet in address)
+
+        # Get network address
+        network_address = address[:prefix] + '0' * (32 - prefix)
+
+        # Convert network address to decimal
+        network_address = [str(int(network_address[i:i+8], 2)) for i in range(0, 32, 8)]
+
+        return '.'.join(network_address)

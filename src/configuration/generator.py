@@ -4,10 +4,11 @@ import time
 from ryu.base import app_manager
 from ryu.controller.handler import set_ev_cls
 
-from src.events import EventPolicies, EventTopology
-from src.policy.policies import AddressPolicy
+from src.events import EventPolicies, EventTopology, EventClassicConfigurations, EventSdnConfigurations
 
 class ConfigurationGenerator(app_manager.RyuApp):
+    _EVENTS = [EventClassicConfigurations, EventSdnConfigurations]
+
     def __init__(self, *args, **kwargs):
         super(ConfigurationGenerator, self).__init__(*args, **kwargs)
 
@@ -68,6 +69,8 @@ class ConfigurationGenerator(app_manager.RyuApp):
             self.apply_policy(policy)
 
         self.global_routing()
+
+        self.send_configurations()
 
         self.logger.debug(f'Generated configurations: {self.configurations}')
         
@@ -232,6 +235,22 @@ class ConfigurationGenerator(app_manager.RyuApp):
             unvisited.remove(minimum)
         
         return distances
+
+    # Send generated configurations to ClassicConfigurator and SdnConfigurator
+    def send_configurations(self):
+        classic_configurations = {}
+        sdn_configurations = {}
+
+        for device in self.configurations:
+            d = self.get_device(device)
+
+            if d and d['type'] == 'Classic':
+                classic_configurations[device] = self.configurations[device]
+            elif d and d['type'] == 'SDN':
+                sdn_configurations[device] = self.configurations[device]
+
+        self.send_event_to_observers(EventClassicConfigurations(classic_configurations))
+        # self.send_event_to_observers(EventSdnConfigurations(sdn_configurations))
 
     # Returns list of neighbours for a device
     def get_neighbours(self, device):
