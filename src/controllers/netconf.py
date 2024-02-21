@@ -72,8 +72,6 @@ class NetconfController(app_manager.RyuApp):
     def configure_devices(self, ev):
         configurations = ev.configurations
 
-        self.logger.info(f'Configuring devices {configurations}')
-
         for device_name in configurations:
             device = next((d for d in self.devices if d.hostname == device_name), None)
 
