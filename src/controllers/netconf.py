@@ -412,7 +412,8 @@ class Device:
             self.logger.error(f'Failed to configure route {destination}/{prefix} via {next_hop} on {interface} on {self.ip_address} ({self.hostname}): {str(e)}')
 
             return False
-    
+
+    # TODO: Move to a helper class
     # Get network address from host address and prefix
     def get_network_address(self, address, prefix):
         address = address.split('.')

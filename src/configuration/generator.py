@@ -250,7 +250,7 @@ class ConfigurationGenerator(app_manager.RyuApp):
                 sdn_configurations[device] = self.configurations[device]
 
         self.send_event_to_observers(EventClassicConfigurations(classic_configurations))
-        # self.send_event_to_observers(EventSdnConfigurations(sdn_configurations))
+        self.send_event_to_observers(EventSdnConfigurations(sdn_configurations))
 
     # Returns list of neighbours for a device
     def get_neighbours(self, device):
@@ -270,6 +270,7 @@ class ConfigurationGenerator(app_manager.RyuApp):
     def get_device(self, name):
         return next((device for device in self.devices if device["name"] == name), None)
     
+    # TODO: Move this to a helper class
     # Append item to a list in a dictionary
     def append_dict_list(self, dict, key, item):
         if key in dict:

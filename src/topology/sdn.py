@@ -7,10 +7,10 @@ from ryu.controller import ofp_event
 from ryu.controller.handler import MAIN_DISPATCHER, DEAD_DISPATCHER
 from ryu.ofproto import ofproto_v1_3
 
-from scapy.layers.l2 import Ether
+from scapy.layers.l2 import Ether, ARP
 from scapy.contrib import lldp
 
-from src.events import EventSdnTopology
+from src.events import EventSdnTopology, EventSdnConfigurations
 
 # Handles topology discovery for SDN (OpenFlow) devices
 class SdnTopologyDiscovery(app_manager.RyuApp):
@@ -25,6 +25,9 @@ class SdnTopologyDiscovery(app_manager.RyuApp):
 
         # Mapping datapath ID to label
         self.labels = {}
+
+        # Mapping label to datapath object
+        self.datapaths = {}
         
         self.load_all_labels()
         
@@ -35,8 +38,83 @@ class SdnTopologyDiscovery(app_manager.RyuApp):
         # {'label': {'system_name': {'port': 1, 'ttl': 120}, ...}, ...}
         self.lldp = {}
 
+        # Dictionary for applied configurations
+        # {label: [config1, config2, ...], ...}
+        self.configurations = {}
+
         # Stores current time. Used for LLDP timeout
         self.time = time.time()
+
+    # TODO: move this to a separate app. Shouldn't be part of topology discovery
+    # Configure SDN devices with received configurations
+    @set_ev_cls(EventSdnConfigurations)
+    def configure_devices(self, ev):
+        configurations = ev.configurations
+
+        for label in configurations:
+            for config in configurations[label]:
+                self.configure(label, config)
+        
+    # Configure device
+    def configure(self, label, config):
+        if label in self.configurations and config in self.configurations[label]:
+            return # Configuration already applied
+        
+        split = config.split(' ')
+
+        if split[0] == 'address':
+            interface = split[1]
+            (address, prefix) = split[2].split('/')
+
+            if self.configure_address(label, interface, address, prefix):
+                self.append_dict_list(self.configurations, label, config) # Add successful configuration
+
+        elif split[0] == 'route':
+            (address, prefix) = split[1].split('/')
+            destination = self.get_network_address(address, prefix)
+
+            interface = split[2]
+
+            if self.configure_route(label, destination, prefix, interface):
+                self.append_dict_list(self.configurations, label, config) # Add successful configuration
+        else:
+            self.logger.error(f'Invalid configuration for device {label}: {config}')
+
+    # Configure address on device
+    def configure_address(self, label, interface, address, prefix):
+        # Install flow to send ARP requests for the configured address to the controller
+        datapath = self.datapaths[label]
+        ofp = datapath.ofproto
+        ofp_parser = datapath.ofproto_parser
+
+        actions = [ofp_parser.OFPActionOutput(ofp.OFPP_CONTROLLER)]
+        match = ofp_parser.OFPMatch(eth_type=0x0806, in_port=int(interface), arp_tpa=address, arp_op=1)
+        instructions = [ofp_parser.OFPInstructionActions(ofp.OFPIT_APPLY_ACTIONS, actions)]
+        datapath.send_msg(ofp_parser.OFPFlowMod(datapath=datapath, match=match, instructions=instructions))
+        
+        # Configure route to the configured address
+        destination = self.get_network_address(address, prefix)
+        self.configure_route(label, destination, prefix, interface)
+
+        self.logger.debug(f'Configured address {address} on {interface} for {label}')
+        return True
+
+    # Configure route on device
+    def configure_route(self, label, destination, prefix, interface):
+        # Install flow to route packets to the configured destination to the configured interface
+        datapath = self.datapaths[label]
+        ofp = datapath.ofproto
+        ofp_parser = datapath.ofproto_parser
+
+        actions = [
+            ofp_parser.OFPActionSetField(eth_dst='ff:ff:ff:ff:ff:ff'), # Broadcast MAC address to not deal with ARP
+            ofp_parser.OFPActionOutput(int(interface))]
+        match = ofp_parser.OFPMatch(eth_type=0x0800, ipv4_dst=f'{destination}/{prefix}')
+        instructions = [ofp_parser.OFPInstructionActions(ofp.OFPIT_APPLY_ACTIONS, actions)]
+        datapath.send_msg(ofp_parser.OFPFlowMod(datapath=datapath, match=match, instructions=instructions))
+
+        self.logger.debug(f'Configured route {destination}/{prefix} to {interface} for {label}')
+        return True
 
     # Load SDN devices labels from previous sessions
     def load_all_labels(self):
@@ -73,6 +151,7 @@ class SdnTopologyDiscovery(app_manager.RyuApp):
                 label = self.all_labels[datapath.id]
 
                 self.labels[datapath.id] = label
+                self.datapaths[label] = datapath
 
                 self.logger.debug(f'Found existing SDN device: {datapath.id} ({label})')
             else:
@@ -107,6 +186,7 @@ class SdnTopologyDiscovery(app_manager.RyuApp):
             self.ports.pop(self.labels[datapath.id])
             self.lldp.pop(self.labels[datapath.id])
 
+            self.datapaths.pop(self.labels[datapath.id])
             self.labels.pop(datapath.id)
 
             self.logger.debug(f'Datapath {datapath.id} disconnected')
@@ -148,7 +228,7 @@ class SdnTopologyDiscovery(app_manager.RyuApp):
         ofp_parser = datapath.ofproto_parser
 
         instructions = [ofp_parser.OFPInstructionActions(ofp.OFPIT_APPLY_ACTIONS, [])]
-        datapath.send_msg(ofp_parser.OFPFlowMod(datapath=datapath, hard_timeout=timeout, instructions=instructions, flags=ofp.OFPFF_SEND_FLOW_REM))
+        datapath.send_msg(ofp_parser.OFPFlowMod(datapath=datapath, priority=10, hard_timeout=timeout, instructions=instructions, flags=ofp.OFPFF_SEND_FLOW_REM))
 
         self.update_lldp_database()
 
@@ -180,6 +260,8 @@ class SdnTopologyDiscovery(app_manager.RyuApp):
     def packet_in_handler(self, ev):
         msg = ev.msg
         datapath = msg.datapath
+        ofp = datapath.ofproto
+        ofp_parser = datapath.ofproto_parser
         port_in = msg.match['in_port']
 
         pkt = Ether(msg.data)
@@ -192,7 +274,14 @@ class SdnTopologyDiscovery(app_manager.RyuApp):
 
             self.logger.debug(f'LLDP packet received on {self.labels[datapath.id]} ({self.labels[datapath.id]}), port: {port_in}, system name: {system_name} TTL: {time_to_live}')
 
-        self.logger.debug(f'Packet in received on {datapath.id} ({self.labels[datapath.id]}), port: {port_in}, packet: {pkt}')
+        elif pkt.type == 0x0806: # ARP EtherType
+            arp_reply = self.craft_arp_reply(self.labels[datapath.id], port_in, pkt)
+            datapath.send_msg(datapath.ofproto_parser.OFPPacketOut(datapath=datapath, buffer_id=datapath.ofproto.OFP_NO_BUFFER, in_port=ofp.OFPP_CONTROLLER, actions=[datapath.ofproto_parser.OFPActionOutput(port_in)], data=arp_reply.build()))
+
+            self.logger.debug(f'ARP packet received on {datapath.id} ({self.labels[datapath.id]}), port: {port_in}, packet: {pkt}')
+
+        else:
+            self.logger.debug(f'Packet in received on {datapath.id} ({self.labels[datapath.id]}), port: {port_in}, packet: {pkt}')
         
     # Update LLDP timers, remove expired entries, and send topology to TopologyManager
     def update_lldp_database(self):
@@ -234,3 +323,31 @@ class SdnTopologyDiscovery(app_manager.RyuApp):
         / lldp.LLDPDUSystemName(system_name=label) \
         / lldp.LLDPDUPortDescription(description=f'OFPort-{port_no}') \
         / lldp.LLDPDUEndOfLLDPDU()
+
+    # Carft ARP reply packet
+    def craft_arp_reply(self, label, port_in, pkt):
+        hw_addr = next((p['hw_addr'] for p in self.ports[label] if p['port_no'] == port_in), None)
+
+        return Ether(dst=pkt[Ether].src, src=hw_addr) \
+        / ARP(op=2, hwsrc=hw_addr, psrc=pkt[ARP].pdst, hwdst=pkt[ARP].hwsrc, pdst=pkt[ARP].psrc)
+
+    def append_dict_list(self, dict, key, item):
+        if key in dict:
+            dict[key].append(item)
+        else:
+            dict[key] = [item]
+
+    def get_network_address(self, address, prefix):
+        address = address.split('.')
+        prefix = int(prefix)
+
+        # Convert address to binary
+        address = ''.join(format(int(octet), '08b') for octet in address)
+
+        # Get network address
+        network_address = address[:prefix] + '0' * (32 - prefix)
+
+        # Convert network address to decimal
+        network_address = [str(int(network_address[i:i+8], 2)) for i in range(0, 32, 8)]
+
+        return '.'.join(network_address)
