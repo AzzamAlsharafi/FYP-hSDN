@@ -1,10 +1,11 @@
 import { useEffect } from "react";
-import { useAppDispatch, useAppSelector } from "./redux/hooks";
-import { loadTopology, topologySelector } from "./redux/appSlice";
+import { useAppDispatch } from "./redux/hooks";
+import { loadTopology } from "./redux/appSlice";
 import { AppDispatch } from "./redux/store";
+import TopologyGraph from "./components/TopologyGraph";
+import { Box } from "@chakra-ui/react";
 
 export default function App() {
-  const topology = useAppSelector(topologySelector);
   const dispatch = useAppDispatch();
   
   // Fetch data periodically from API
@@ -17,9 +18,9 @@ export default function App() {
   }, []);
 
   return (
-    <div style={{ width: '100vw', height: '100vh'}}>
-      <pre>{JSON.stringify(topology, null, 2) }</pre>
-    </div>
+    <Box style={{ width: '100vw', height: '100vh'}}>
+      <TopologyGraph />
+    </Box>
   );
 }
 
