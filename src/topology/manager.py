@@ -57,10 +57,15 @@ class TopologyManager(app_manager.RyuApp):
             })
         
         for label, ports in sdn_ports.items():
+            s_ports = sorted(ports, key=lambda port: port['port_no'])
+
+            for p in s_ports:
+                p['interface_name'] = p['port_no']                
+
             self.devices.append({
                 'name': label,
                 'type': 'SDN',
-                'ports': sorted(ports, key=lambda port: port['port_no'])
+                'ports': s_ports
             })
 
         # Add links info. Only add bidirectional neighbors,
