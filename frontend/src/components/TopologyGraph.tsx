@@ -1,10 +1,10 @@
-import ReactFlow, { Background, ConnectionMode, Controls, Edge, EdgeChange, Node, NodeChange, SelectionMode, applyEdgeChanges, applyNodeChanges } from "reactflow";
+import ReactFlow, { Background, ConnectionMode, Controls, Edge, Node, SelectionMode, useEdgesState, useNodesState } from "reactflow";
 import { Device, Topology, topologySelector } from "../redux/appSlice";
 import { useAppSelector } from "../redux/hooks";
 
 import 'reactflow/dist/style.css';
 import { Box } from "@chakra-ui/react";
-import { useCallback, useEffect, useState } from "react";
+import { useEffect } from "react";
 import DeviceNode from "./DeviceNode";
 
 const nodeTypes = {'device': DeviceNode};
@@ -12,8 +12,8 @@ const nodeTypes = {'device': DeviceNode};
 export default function TopologyGraph() {
     const topology = useAppSelector(topologySelector);
 
-    const [nodes, setNodes] = useState(createNodes(topology, null));
-    const [edges, setEdges] = useState(createEdges(topology, null));
+    const [nodes, setNodes, onNodesChange] = useNodesState(createNodes(topology, null));
+    const [edges, setEdges, onEdgesChange] = useEdgesState(createEdges(topology, null));
 
     useEffect(() => {
         setNodes(createNodes(topology, nodes));
@@ -22,17 +22,7 @@ export default function TopologyGraph() {
         console.log(edges)
         console.log(topology.links)
 
-    }, [topology]);
-
-    const onNodesChange = useCallback(
-        (changes: NodeChange[]) => setNodes((nds) => applyNodeChanges(changes, nds)),
-        [],
-      );
-
-      const onEdgesChange = useCallback(
-        (changes: EdgeChange[]) => setEdges((eds) => applyEdgeChanges(changes, eds)),
-        [],
-      );      
+    }, [topology]); 
 
     return (
         <Box w='100%' h='100%'>
