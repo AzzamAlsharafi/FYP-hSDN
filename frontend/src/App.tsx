@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 import { useAppDispatch } from "./redux/hooks";
-import { loadTopology } from "./redux/appSlice";
+import { loadConfig, loadTopology } from "./redux/appSlice";
 import { AppDispatch } from "./redux/store";
 import TopologyGraph from "./components/TopologyGraph";
 import { Box } from "@chakra-ui/react";
@@ -12,8 +12,10 @@ export default function App() {
   useEffect(() => {
     const interval = setInterval(() => {
       fetchTopology(dispatch);
+      fetchConfig(dispatch);
     }, 1000);
     fetchTopology(dispatch);
+    fetchConfig(dispatch);
     return () => clearInterval(interval);
   }, []);
 
@@ -24,8 +26,10 @@ export default function App() {
   );
 }
 
+const url = import.meta.env.VITE_URL;
+
 function fetchTopology(dispatch: AppDispatch) {
-  fetch('http://127.0.0.1:8000/topology')
+  fetch(url + '/topology')
     .then((response) => {
       if (!response.ok) {
         console.error('Failed to fetch topology data: ', response);
@@ -35,6 +39,21 @@ function fetchTopology(dispatch: AppDispatch) {
       response.json().then((data) => {
         console.log('Fetched topology data: ', data);
         dispatch(loadTopology(data));
+      });
+    })
+}
+
+function fetchConfig(dispatch: AppDispatch) {
+  fetch(url + '/configurations')
+    .then((response) => {
+      if (!response.ok) {
+        console.error('Failed to fetch configurations data: ', response);
+        return;
+      }
+
+      response.json().then((data) => {
+        console.log('Fetched configurations data: ', data);
+        dispatch(loadConfig(data));
       });
     })
 }

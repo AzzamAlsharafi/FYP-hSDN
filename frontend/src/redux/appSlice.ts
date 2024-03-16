@@ -23,14 +23,31 @@ export type Topology = {
   links: Link[]
 }
 
+export type Config = {
+  classic: {
+    [key: string]: String[]
+  },
+  sdn: {
+    [key: string]: String[]
+  }
+}
+
+export type Subnet = {
+  device: string,
+  port: string,
+  address: string,
+}
+
 // Define a type for the slice state
 export type AppState = {
-  topology: Topology
+  topology: Topology,
+  config: Config
 }
 
 // Define the initial state using that type
 const initialState: AppState = {
-    topology: {devices: [], links: []}
+    topology: {devices: [], links: []},
+    config: {classic: {}, sdn: {}}
 }
 
 export const appSlice = createSlice({
@@ -41,11 +58,15 @@ export const appSlice = createSlice({
     loadTopology: (state, action: PayloadAction<Topology>) => {
       state.topology = action.payload
     },
+    loadConfig: (state, action: PayloadAction<Config>) => {
+      state.config = action.payload
+    }
   }
 })
 
-export const { loadTopology } = appSlice.actions
+export const { loadTopology, loadConfig } = appSlice.actions
 
 export const topologySelector = (state: { app: AppState }) => state.app.topology;
+export const configSelector = (state: { app: AppState }) => state.app.config;
 
 export default appSlice.reducer

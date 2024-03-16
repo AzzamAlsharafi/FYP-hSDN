@@ -1,23 +1,54 @@
 import ReactFlow, { Background, ConnectionMode, Controls, Edge, Node, SelectionMode, useEdgesState, useNodesState } from "reactflow";
-import { Device, Topology, topologySelector } from "../redux/appSlice";
+import { Device, Topology, Subnet, configSelector, topologySelector } from "../redux/appSlice";
 import { useAppSelector } from "../redux/hooks";
 
 import 'reactflow/dist/style.css';
 import { Box } from "@chakra-ui/react";
-import { useEffect } from "react";
+import { useEffect, useMemo } from "react";
 import DeviceNode from "./DeviceNode";
+import SubnetNode from "./SubnetNode";
+import { getNetworkAddress } from "../utils";
 
-const nodeTypes = {'device': DeviceNode};
+const nodeTypes = {'device': DeviceNode, 'subnet': SubnetNode};
 
 export default function TopologyGraph() {
     const topology = useAppSelector(topologySelector);
+    const config = useAppSelector(configSelector);
 
-    const [nodes, setNodes, onNodesChange] = useNodesState(createNodes(topology, null));
-    const [edges, setEdges, onEdgesChange] = useEdgesState(createEdges(topology, null));
+    const subnets = useMemo(
+        () => {
+            const subnets = [] as Subnet[];
+            
+            for (const [_, valueType] of Object.entries(config)) {
+                for (const [keyDevice, valueDevice] of Object.entries(valueType)) {
+                    valueDevice.forEach((configLine) => {
+                        const words = configLine.split(' ');
+                        if (words[0] == 'address') {
+                            if (topology.links.find((link) => 
+                            (link.device1 == keyDevice && link.port1 == words[1])
+                            || (link.device2 == keyDevice && link.port2 == words[1])) == undefined) {
+                                subnets.push({
+                                    device: keyDevice,
+                                    port: words[1],
+                                    address: getNetworkAddress(words[2])
+                                });
+                            }
+                        }
+                    })
+                }
+            }
+
+            return subnets;
+        },
+        [config]
+    )
+
+    const [nodes, setNodes, onNodesChange] = useNodesState(createNodes(topology, subnets, null));
+    const [edges, setEdges, onEdgesChange] = useEdgesState(createEdges(topology, subnets, null));
 
     useEffect(() => {
-        setNodes(createNodes(topology, nodes));
-        setEdges(createEdges(topology, edges));
+        setNodes(createNodes(topology, subnets, nodes));
+        setEdges(createEdges(topology, subnets, edges));
 
         console.log(edges)
         console.log(topology.links)
@@ -35,7 +66,8 @@ export default function TopologyGraph() {
             selectionMode={SelectionMode.Partial}
             connectionMode={ConnectionMode.Loose}
             nodesConnectable={false}
-            deleteKeyCode={null}>
+            deleteKeyCode={null}
+            fitView>
                 <Background />
                 <Controls />
             </ReactFlow>
@@ -43,8 +75,18 @@ export default function TopologyGraph() {
     );
 }
 
-function createNodes(topology: Topology, oldNodes: Node<Device>[] | null): Node<Device>[] {
-    return topology.devices.map((device, index) => {
+// TODO: temporary solution
+function getInitialPosition(topology: Topology, name: string, counter: number): {x: number, y: number} {
+    // const device = topology.devices.find((device) => device.name == name)!;
+    const links = topology.links.filter((link) => link.device1 == name || link.device2 == name).length;
+    const y = 1000 - links * 100;
+    return {x: counter * 200, y};
+}
+
+function createNodes(topology: Topology, subnets: Subnet[], oldNodes: Node<Device | Subnet>[] | null): Node<Device | Subnet>[] {
+    let counter = 0;
+
+    const devices = topology.devices.map((device, _) => {
         const old = oldNodes?.find((node) => node.id == device.name);
         
         if (old) {
@@ -53,15 +95,34 @@ function createNodes(topology: Topology, oldNodes: Node<Device>[] | null): Node<
             return {
                 id: device.name,
                 type: 'device',
-                position: {x: index * 200, y: 100},
+                position: getInitialPosition(topology, device.name, counter++),
                 data: device
             }
         }
-    })
+    });
+
+    const subnetsNodes = subnets.map((subnet, _) => {
+        const old = oldNodes?.find((node) => node.id == `SUBNET-${subnet.device}-${subnet.port}`);
+
+        if (old) {
+            return {...old, data: subnet};
+        } else {
+            const devicePosition = devices.find((device) => device.id == subnet.device)?.position || {x: 100, y: 100}
+
+            return {
+                id: `SUBNET-${subnet.device}-${subnet.port}`,
+                type: 'subnet',
+                position: {x: devicePosition.x - 20, y: devicePosition.y + 120},
+                data: subnet
+            }
+        }
+    });
+
+    return [...devices, ...subnetsNodes];
 }
 
-function createEdges(topology: Topology, oldEdges: Edge[] | null): Edge[] {
-    return topology.links.map((link) => {
+function createEdges(topology: Topology, subnets: Subnet[], oldEdges: Edge[] | null): Edge[] {
+    const devices = topology.links.map((link) => {
         const id = `${link.device1}-${link.port1}-${link.device2}-${link.port2}`;
         const old = oldEdges?.find((edge) => edge.id == id);
 
@@ -78,4 +139,24 @@ function createEdges(topology: Topology, oldEdges: Edge[] | null): Edge[] {
             }
         }
     })
+
+    const subnetsEdges = subnets.map((subnet) => {
+        const id = `SUBNET-EDGE-${subnet.device}-${subnet.port}`;
+        const old = oldEdges?.find((edge) => edge.id == id);
+
+        if (old) {
+            return old;
+        } else {
+            return {
+                id: id,
+                source: `${subnet.device}`,
+                sourceHandle: `${subnet.port}`,
+                target: `SUBNET-${subnet.device}-${subnet.port}`,
+                targetHandle: 'SUBNET-HANDLE',
+                type: 'straight'
+            }
+        }
+    });
+
+    return [...devices, ...subnetsEdges];
 }
