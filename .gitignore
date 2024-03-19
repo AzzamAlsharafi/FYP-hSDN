@@ -6,3 +6,5 @@ config/*
 !config/*.example
 
 .vscode
+
+src/api/host.py

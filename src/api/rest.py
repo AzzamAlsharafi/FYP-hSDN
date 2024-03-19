@@ -5,6 +5,8 @@ from typing import List
 
 import uvicorn
 
+import src.api.host as host
+
 app = FastAPI()
 
 origins = [
@@ -57,4 +59,4 @@ def update_sdn_configurations(sdn_conf: dict):
     configurations["sdn"] = sdn_conf
     return {"sdn": configurations["sdn"]}
 
-uvicorn.run(app)
+uvicorn.run(app, host=host.host)
