@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 import { useAppDispatch } from "./redux/hooks";
-import { loadConfig, loadTopology } from "./redux/appSlice";
+import { loadConfig, loadPolicies, loadTopology } from "./redux/appSlice";
 import { AppDispatch } from "./redux/store";
 import TopologyGraph from "./components/TopologyGraph";
 import { Box } from "@chakra-ui/react";
@@ -18,6 +18,7 @@ export default function App() {
     }, 1000);
     fetchTopology(dispatch);
     fetchConfig(dispatch);
+    fetchPolicies(dispatch);
     return () => clearInterval(interval);
   }, []);
 
@@ -59,6 +60,20 @@ function fetchConfig(dispatch: AppDispatch) {
 
       response.json().then((data) => {
         dispatch(loadConfig(data));
+      });
+    })
+}
+
+function fetchPolicies(dispatch: AppDispatch) {
+  fetch(url + '/policies')
+    .then((response) => {
+      if (!response.ok) {
+        console.error('Failed to fetch policies data: ', response);
+        return;
+      }
+
+      response.json().then((data) => {
+        dispatch(loadPolicies(data));
       });
     })
 }

@@ -39,10 +39,55 @@ export type Subnet = {
   address: string,
 }
 
+export type AddressPolicy = {
+  type: 'address',
+  device: string,
+  interface: number,
+  address: string,
+}
+
+export type FlowPolicy = {
+  type: 'flow',
+  name: string,
+  src_ip: string,
+  dst_ip: string,
+  protocol: string,
+  src_port: string,
+  dst_port: string,
+}
+
+export type BlockPolicy = {
+  type: 'block',
+  device: string,
+  flow: string,
+}
+
+export type RoutePolicy = {
+  type: 'route',
+  device: string,
+  flow: string,
+  interface: number,
+}
+
+export type ZonePolicy = {
+  type: 'zone',
+  device: string,
+  zone: string,
+}
+
+export type DisablePolicy = {
+  type: 'disable',
+  device: string,
+  interface: number,
+}
+
+export type Policy = AddressPolicy | FlowPolicy | BlockPolicy | RoutePolicy | ZonePolicy | DisablePolicy;
+
 // Define a type for the slice state
 export type AppState = {
   topology: Topology,
   config: Config,
+  policies: Policy[],
   selectedNodes: Node[],
   selectedEdges: Edge[]
 }
@@ -51,6 +96,7 @@ export type AppState = {
 const initialState: AppState = {
     topology: {devices: [], links: []},
     config: {classic: {}, sdn: {}},
+    policies: [],
     selectedNodes: [],
     selectedEdges: []
 }
@@ -66,6 +112,9 @@ export const appSlice = createSlice({
     loadConfig: (state, action: PayloadAction<Config>) => {
       state.config = action.payload
     },
+    loadPolicies: (state, action: PayloadAction<Policy[]>) => {
+      state.policies = action.payload
+    },
     selectNodes: (state, action: PayloadAction<Node[]>) => {
       state.selectedNodes = action.payload
     },
@@ -75,10 +124,11 @@ export const appSlice = createSlice({
   }
 })
 
-export const { loadTopology, loadConfig, selectNodes, selectEdges } = appSlice.actions
+export const { loadTopology, loadConfig, loadPolicies, selectNodes, selectEdges } = appSlice.actions
 
 export const topologySelector = (state: { app: AppState }) => state.app.topology;
 export const configSelector = (state: { app: AppState }) => state.app.config;
+export const policiesSelector = (state: { app: AppState }) => state.app.policies;
 export const nodesSelector = (state: { app: AppState }) => state.app.selectedNodes;
 export const edgesSelector = (state: { app: AppState }) => state.app.selectedEdges;
 
