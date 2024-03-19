@@ -31,6 +31,10 @@ configurations = {
     "sdn": {}
 }
 
+policies = {
+    "policies": []
+}
+
 @app.get("/")
 def read_root():
     return {"Hello": "Ryu"}
@@ -58,5 +62,14 @@ def update_classic_configurations(classic_conf: dict):
 def update_sdn_configurations(sdn_conf: dict):
     configurations["sdn"] = sdn_conf
     return {"sdn": configurations["sdn"]}
+
+@app.get("/policies")
+def read_policies():
+    return policies["policies"]
+
+@app.put("/policies")
+def update_policies(new_policies: List[dict]):
+    policies["policies"] = new_policies
+    return {"policies": policies}
 
 uvicorn.run(app, host=host.host)

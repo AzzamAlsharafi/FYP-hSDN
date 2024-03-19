@@ -6,6 +6,9 @@ import re
 class Policy:
     def __init__(self, type):
         self.type = type
+    
+    def to_dict(self):
+        return {k: v for k, v in self.__dict__.items() if not k.startswith('_')}
 
 # Address policy. Used to configure an address on interface on a device.
 class AddressPolicy(Policy):

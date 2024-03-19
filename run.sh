@@ -6,6 +6,8 @@ export PYTHONPATH=.
 python ./src/api/rest.py &
 api_pid=$!
 
+sleep 5
+
 ryu-manager ./src/topology/manager.py \
             ./src/controllers/netconf.py \
             ./src/topology/classic.py \

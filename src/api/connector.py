@@ -4,7 +4,7 @@ import requests
 from ryu.base import app_manager
 from ryu.controller.handler import set_ev_cls
 
-from src.events import EventTopology, EventClassicConfigurations, EventSdnConfigurations
+from src.events import EventPolicies, EventTopology, EventClassicConfigurations, EventSdnConfigurations
 import src.api.host as host
 
 url = f'http://{host.host}:8000'
@@ -45,3 +45,15 @@ class ApiConnector(app_manager.RyuApp):
             requests.put(f'{url}/configurations/sdn', json=ev.configurations)
         except Exception as e:
             self.logger.error(f'Failed to send SDN configurations to API: {str(e)}')
+    
+    @set_ev_cls(EventPolicies)
+    def policies_handler(self, ev):
+        try:
+            policies = []
+
+            for policy in ev.policies:
+                policies.append(policy.to_dict())
+
+            requests.put(f'{url}/policies', json=policies)
+        except Exception as e:
+            self.logger.error(f'Failed to send policies to API: {str(e)}')
