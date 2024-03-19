@@ -1,6 +1,6 @@
-import ReactFlow, { Background, ConnectionMode, Controls, Edge, Node, SelectionMode, useEdgesState, useNodesState } from "reactflow";
-import { Device, Topology, Subnet, configSelector, topologySelector } from "../redux/appSlice";
-import { useAppSelector } from "../redux/hooks";
+import ReactFlow, { Background, ConnectionMode, Controls, Edge, Node, SelectionMode, useEdgesState, useNodesState, useOnSelectionChange } from "reactflow";
+import { Device, Topology, Subnet, configSelector, topologySelector, selectNodes, selectEdges } from "../redux/appSlice";
+import { useAppDispatch, useAppSelector } from "../redux/hooks";
 
 import 'reactflow/dist/style.css';
 import { Box } from "@chakra-ui/react";
@@ -14,6 +14,7 @@ const nodeTypes = {'device': DeviceNode, 'subnet': SubnetNode};
 export default function TopologyGraph() {
     const topology = useAppSelector(topologySelector);
     const config = useAppSelector(configSelector);
+    const dispatch = useAppDispatch();
 
     const subnets = useMemo(
         () => {
@@ -50,10 +51,14 @@ export default function TopologyGraph() {
         setNodes(createNodes(topology, subnets, nodes));
         setEdges(createEdges(topology, subnets, edges));
 
-        console.log(edges)
-        console.log(topology.links)
-
     }, [topology]); 
+
+    useOnSelectionChange({
+        onChange: ({ nodes, edges }) => {
+            dispatch(selectNodes(nodes));
+            dispatch(selectEdges(edges));
+        },
+    })
 
     return (
         <Box w='100%' h='100%'>
@@ -153,7 +158,8 @@ function createEdges(topology: Topology, subnets: Subnet[], oldEdges: Edge[] | n
                 sourceHandle: `${subnet.port}`,
                 target: `SUBNET-${subnet.device}-${subnet.port}`,
                 targetHandle: 'SUBNET-HANDLE',
-                type: 'straight'
+                type: 'straight',
+                animated: true
             }
         }
     });

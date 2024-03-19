@@ -1,4 +1,5 @@
 import { createSlice, PayloadAction } from '@reduxjs/toolkit'
+import { Edge, Node } from "reactflow";
 
 export type Port = {
   interface_name: string,
@@ -41,13 +42,17 @@ export type Subnet = {
 // Define a type for the slice state
 export type AppState = {
   topology: Topology,
-  config: Config
+  config: Config,
+  selectedNodes: Node[],
+  selectedEdges: Edge[]
 }
 
 // Define the initial state using that type
 const initialState: AppState = {
     topology: {devices: [], links: []},
-    config: {classic: {}, sdn: {}}
+    config: {classic: {}, sdn: {}},
+    selectedNodes: [],
+    selectedEdges: []
 }
 
 export const appSlice = createSlice({
@@ -60,13 +65,21 @@ export const appSlice = createSlice({
     },
     loadConfig: (state, action: PayloadAction<Config>) => {
       state.config = action.payload
+    },
+    selectNodes: (state, action: PayloadAction<Node[]>) => {
+      state.selectedNodes = action.payload
+    },
+    selectEdges: (state, action: PayloadAction<Edge[]>) => {
+      state.selectedEdges = action.payload
     }
   }
 })
 
-export const { loadTopology, loadConfig } = appSlice.actions
+export const { loadTopology, loadConfig, selectNodes, selectEdges } = appSlice.actions
 
 export const topologySelector = (state: { app: AppState }) => state.app.topology;
 export const configSelector = (state: { app: AppState }) => state.app.config;
+export const nodesSelector = (state: { app: AppState }) => state.app.selectedNodes;
+export const edgesSelector = (state: { app: AppState }) => state.app.selectedEdges;
 
 export default appSlice.reducer
