@@ -22,7 +22,7 @@ export default function DeviceNode(props: NodeProps<Device>) {
             {
                 props.data.ports.map((port) => {
                     return (
-                        <Handle type='source' position={Position.Top} id={port.interface_name}
+                        <Handle key={props.data.name+port.interface_name} type='source' position={Position.Top} id={port.interface_name}
                         style={{left: '40px', top: '37px', visibility: 'hidden'}} />
                     )
                 })

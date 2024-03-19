@@ -12,9 +12,10 @@ export default function SubnetNode(props: NodeProps<Subnet>) {
                 border={props.selected ? '4px' : '2px'}
                 borderColor={props.selected ? 'black' : border}
                 bg={props.selected ? border : bg}
-                _hover={{ bg: border }}
+                textColor={props.selected ? bg : border}
+                _hover={{ bg: border, textColor: bg }}
             >
-                <Box textAlign='center' fontWeight='bold' textColor={props.selected ? bg : border}>
+                <Box textAlign='center' fontWeight='bold' >
                     {props.data.address}
                 </Box>
             </Center>
