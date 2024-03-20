@@ -83,13 +83,44 @@ export type DisablePolicy = {
 
 export type Policy = AddressPolicy | FlowPolicy | BlockPolicy | RoutePolicy | ZonePolicy | DisablePolicy;
 
+export type PolicyModal = {
+  type: string,
+  deviceName: string,
+  device?: Device,
+  interface: number,
+  address: string,
+  flow: string,
+  src_ip: string,
+  dst_ip: string,
+  protocol: string,
+  src_port: string,
+  dst_port: string,
+  zone: string,
+}
+
+export type PolicyModalUpdate = {
+  type?: string,
+  deviceName?: string,
+  interface?: number,
+  address?: string,
+  flow?: string,
+  src_ip?: string,
+  dst_ip?: string,
+  protocol?: string,
+  src_port?: string,
+  dst_port?: string,
+  zone?: string,
+}
+
 // Define a type for the slice state
 export type AppState = {
   topology: Topology,
   config: Config,
   policies: Policy[],
   selectedNodes: Node[],
-  selectedEdges: Edge[]
+  selectedEdges: Edge[],
+  policyOpen: boolean,
+  policyModal: PolicyModal
 }
 
 // Define the initial state using that type
@@ -98,7 +129,22 @@ const initialState: AppState = {
     config: {classic: {}, sdn: {}},
     policies: [],
     selectedNodes: [],
-    selectedEdges: []
+    selectedEdges: [],
+    policyOpen: false,
+    policyModal: {
+      type: '',
+      deviceName: '',
+      device: undefined,
+      interface: -1,
+      address: '',
+      flow: '',
+      src_ip: '',
+      dst_ip: '',
+      protocol: '',
+      src_port: '',
+      dst_port: '',
+      zone: '',
+    }
 }
 
 export const appSlice = createSlice({
@@ -120,16 +166,42 @@ export const appSlice = createSlice({
     },
     selectEdges: (state, action: PayloadAction<Edge[]>) => {
       state.selectedEdges = action.payload
+    },
+    openPolicy: (state) => {
+      state.policyOpen = true
+    },
+    closePolicy: (state) => {
+      state.policyOpen = false
+    },
+    updateModal: (state, action: PayloadAction<PolicyModalUpdate>) => {
+      state.policyModal = {...state.policyModal, ...action.payload}
+
+      if (action.payload.deviceName) {
+        state.policyModal.device = state.topology.devices.find(d => d.name == state.policyModal.deviceName)
+      } else if (action.payload.deviceName == '') {
+        state.policyModal.device = undefined
+        state.policyModal.interface = -1
+      }
+    },
+    discardPolicy: (state) => {
+      state.policyModal = initialState.policyModal
+      state.policyOpen = false
+    },
+    savePolicy: (state) => {
+      // TODO: Save policy and send to API
+      state.policyOpen = false
     }
   }
 })
 
-export const { loadTopology, loadConfig, loadPolicies, selectNodes, selectEdges } = appSlice.actions
+export const { loadTopology, loadConfig, loadPolicies, selectNodes, selectEdges, openPolicy, closePolicy, updateModal, discardPolicy, savePolicy } = appSlice.actions
 
 export const topologySelector = (state: { app: AppState }) => state.app.topology;
 export const configSelector = (state: { app: AppState }) => state.app.config;
 export const policiesSelector = (state: { app: AppState }) => state.app.policies;
 export const nodesSelector = (state: { app: AppState }) => state.app.selectedNodes;
 export const edgesSelector = (state: { app: AppState }) => state.app.selectedEdges;
+export const policyOpenSelector = (state: { app: AppState }) => state.app.policyOpen;
+export const policyModalSelector = (state: { app: AppState }) => state.app.policyModal;
 
 export default appSlice.reducer

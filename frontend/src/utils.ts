@@ -1,3 +1,5 @@
+import { FlowPolicy, Policy } from "./redux/appSlice";
+
 export function getNetworkAddress(fullAddress: string){
     const [address, prefixString] = fullAddress.split('/')
 
@@ -16,3 +18,56 @@ export function getNetworkAddress(fullAddress: string){
     }
     return networkAddress.join('.') + '/' + prefix;
 }
+
+export function getPolicyContent(policy: Policy){
+    switch (policy.type){
+        case 'address':
+            return `${policy.interface}: ${policy.address}`;
+        case 'flow':
+            return flowPolicyToString(policy);
+        case 'block':
+            return `${policy.flow}`;
+        case 'route':
+            return `${policy.flow} -> ${policy.interface}`;
+        case 'zone':
+            return `${policy.zone}`;
+        case 'disable':
+            return `${policy.interface}`;
+    }
+}
+
+function flowPolicyToString(policy: FlowPolicy){
+    let result = '';
+
+    if (policy.protocol != '*'){
+        result += `(protocol: ${policy.protocol})`;
+    }
+
+    if (policy.src_ip != '*'){
+        result += ` ${policy.src_ip}`;
+    } else {
+        result += 'any';
+    }
+
+    if (policy.src_port != '*'){
+        result += `:${policy.src_port}`;
+    }
+
+    if (policy.dst_ip != '*'){
+        result += ` -> ${policy.dst_ip}`;
+    } else {
+        result += ' -> any';
+    }
+
+    if (policy.dst_port != '*'){
+        result += `:${policy.dst_port}`;
+    }
+
+    return result;
+}
+
+export const PROTOCOLS = [
+    [6, 'TCP'],
+    [17, 'UDP'],
+    [1, 'ICMP']
+]

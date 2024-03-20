@@ -1,20 +1,49 @@
-import { Box, Text } from "@chakra-ui/react";
-import { useAppSelector } from "../redux/hooks";
-import { edgesSelector, nodesSelector } from "../redux/appSlice";
+import { Box, Button, Divider, Flex, Text } from "@chakra-ui/react";
+import { useAppDispatch, useAppSelector } from "../redux/hooks";
+import { nodesSelector, openPolicy } from "../redux/appSlice";
 import SummaryPanel from "./SummaryPanel";
 import NodePanel from "./NodePanel";
+import PolicyModal from "./PolicyModal";
+import PoliciesList from "./PoliciesList";
 
 export default function Panel() {
     const selectedNodes = useAppSelector(nodesSelector);
-    const selectedEdges = useAppSelector(edgesSelector);
+    const dispatch = useAppDispatch();
 
-    return (
+    return <>
         <Box bg='lightgrey' borderRadius='20px' minW='400px' padding='10px'>
-            <Box bg='white' borderRadius='20px' padding='10px'>
+            <Box bg='white' borderRadius='20px' padding='20px'>
                 {selectedNodes.length == 0 ? <SummaryPanel /> 
                 : selectedNodes.length == 1 ? <NodePanel node={selectedNodes[0]} /> 
                 : <Text>MANY</Text>}
+
+                
+                <Divider/>
+                <Divider/>
+                                
+                <Box marginY='10px' maxH='300px' overflowY='auto'
+                css={{
+                    '&::-webkit-scrollbar': {
+                      width: '4px',
+                    },
+                    '&::-webkit-scrollbar-thumb': {
+                      background: 'grey',
+                      borderRadius: '24px',
+                    },
+                  }}
+                >
+                    <PoliciesList/>
+                </Box>
+
+                <Divider/>
+                <Divider/>
+
+                <Flex paddingTop='20px'>
+                    <Button onClick={() => {dispatch(openPolicy())}} flex='1' marginLeft='5px'>Policies</Button>
+                    <Button flex='1' marginLeft='5px'>Devices</Button>
+                </Flex>
             </Box>
         </Box>
-    );
+        <PolicyModal/>
+    </>;
 }

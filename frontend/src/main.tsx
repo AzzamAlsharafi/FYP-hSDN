@@ -15,6 +15,14 @@ const theme = extendTheme({
     border: {
       classic: '#0050A0',
       sdn: '#A04E00',
+    },
+    policy: {
+      address: '#00FF00',
+      flow: '#FF0000',
+      block: '#000000',
+      route: '#0000FF',
+      zone: '#FFFF00',
+      disable: '#808080',
     }
   }
 });
