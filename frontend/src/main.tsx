@@ -17,12 +17,12 @@ const theme = extendTheme({
       sdn: '#A04E00',
     },
     policy: {
-      address: '#00FF00',
-      flow: '#FF0000',
-      block: '#000000',
-      route: '#0000FF',
-      zone: '#FFFF00',
-      disable: '#808080',
+      address: '#68D391',
+      flow: '#76E4F7',
+      block: '#CBD5E0',
+      route: '#63B3ED',
+      zone: '#F6E05E',
+      disable: '#FC8181',
     }
   }
 });
