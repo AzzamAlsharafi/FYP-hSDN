@@ -165,15 +165,7 @@ export const appSlice = createSlice({
       state.config = action.payload
     },
     loadPolicies: (state, action: PayloadAction<Policy[]>) => {
-      state.policies = [
-        {type: 'flow', name: 'flow1', src_ip: '', dst_ip: '', protocol: '', src_port: '', dst_port: ''},
-        {type: 'address', device: 'device1', interface: 0, address: ''},
-        {type: 'block', device: 'device1', flow: 'flow1'},
-        {type: 'route', device: 'device1', flow: 'flow1', interface: 0},
-        {type: 'zone', device: 'device1', zone: ''},
-        {type: 'disable', device: 'device1', interface: 0},
-        ...action.payload,
-      ]
+      state.policies = action.payload
     },
     selectNodes: (state, action: PayloadAction<Node[]>) => {
       state.selectedNodes = action.payload
