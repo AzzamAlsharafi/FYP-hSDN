@@ -20,6 +20,8 @@ export default function Panel() {
                 
                 <Divider/>
                 <Divider/>
+                <Divider/>
+                <Divider/>
                                 
                 <Box marginY='10px' maxH='300px' overflowY='auto'
                 css={{
@@ -37,9 +39,11 @@ export default function Panel() {
 
                 <Divider/>
                 <Divider/>
+                <Divider/>
+                <Divider/>
 
                 <Flex paddingTop='20px'>
-                    <Button onClick={() => {dispatch(openPolicy())}} flex='1' marginLeft='5px'>Policies</Button>
+                    <Button onClick={() => {dispatch(openPolicy({mode: 'create'}))}} flex='1' marginLeft='5px'>New Policy</Button>
                     <Button flex='1' marginLeft='5px'>Devices</Button>
                 </Flex>
             </Box>

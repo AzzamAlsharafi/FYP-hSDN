@@ -1,4 +1,4 @@
-import { FlowPolicy, Policy } from "./redux/appSlice";
+import { FlowPolicy, Policy, PolicyModal } from "./redux/appSlice";
 
 export function getNetworkAddress(fullAddress: string){
     const [address, prefixString] = fullAddress.split('/')
@@ -40,7 +40,7 @@ function flowPolicyToString(policy: FlowPolicy){
     let result = '';
 
     if (policy.protocol != '*'){
-        result += `(protocol: ${policy.protocol})`;
+        result += `(${getProtocol(policy.protocol)})`;
     }
 
     if (policy.src_ip != '*'){
@@ -66,8 +66,68 @@ function flowPolicyToString(policy: FlowPolicy){
     return result;
 }
 
+export function makePolicy(modal: PolicyModal): Policy{
+    switch (modal.type){
+        case 'address':
+            return {
+                type: 'address',
+                device: modal.deviceName,
+                interface: modal.interface,
+                address: modal.address
+            }
+        case 'flow':
+            return {
+                type: 'flow',
+                name: modal.flow,
+                src_ip: modal.src_ip,
+                dst_ip: modal.dst_ip,
+                protocol: modal.protocol,
+                src_port: modal.src_port,
+                dst_port: modal.dst_port
+            }
+        case 'block':
+            return {
+                type: 'block',
+                device: modal.deviceName,
+                flow: modal.flow
+            }
+        case 'route':
+            return {
+                type: 'route',
+                device: modal.deviceName,
+                flow: modal.flow,
+                interface: modal.interface
+            }
+        case 'zone':
+            return {
+                type: 'zone',
+                device: modal.deviceName,
+                zone: modal.zone
+            }
+        default:
+            return {
+                type: 'disable',
+                device: modal.deviceName,
+                interface: modal.interface
+            }
+    }
+}
+
 export const PROTOCOLS = [
+    ['*', 'Any'],
     [6, 'TCP'],
     [17, 'UDP'],
     [1, 'ICMP']
 ]
+
+function getProtocol(proto: string){
+    const protocol = PROTOCOLS.find(p => p[0] == proto);
+
+    if (protocol){
+        return protocol[1];
+    } else if (proto == ''){
+        return '';
+    } else {
+        return `IP(${proto})`;
+    }
+}

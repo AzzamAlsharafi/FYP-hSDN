@@ -1,5 +1,6 @@
 import { createSlice, PayloadAction } from '@reduxjs/toolkit'
 import { Edge, Node } from "reactflow";
+import { makePolicy } from '../utils';
 
 export type Port = {
   interface_name: string,
@@ -84,6 +85,8 @@ export type DisablePolicy = {
 export type Policy = AddressPolicy | FlowPolicy | BlockPolicy | RoutePolicy | ZonePolicy | DisablePolicy;
 
 export type PolicyModal = {
+  mode: 'create' | 'edit',
+  editOriginal?: Policy,
   type: string,
   deviceName: string,
   device?: Device,
@@ -99,6 +102,8 @@ export type PolicyModal = {
 }
 
 export type PolicyModalUpdate = {
+  mode?: 'create' | 'edit',
+  editOriginal?: Policy,
   type?: string,
   deviceName?: string,
   interface?: number,
@@ -132,6 +137,7 @@ const initialState: AppState = {
     selectedEdges: [],
     policyOpen: false,
     policyModal: {
+      mode: 'create',
       type: '',
       deviceName: '',
       device: undefined,
@@ -159,7 +165,15 @@ export const appSlice = createSlice({
       state.config = action.payload
     },
     loadPolicies: (state, action: PayloadAction<Policy[]>) => {
-      state.policies = action.payload
+      state.policies = [
+        {type: 'flow', name: 'flow1', src_ip: '', dst_ip: '', protocol: '', src_port: '', dst_port: ''},
+        {type: 'address', device: 'device1', interface: 0, address: ''},
+        {type: 'block', device: 'device1', flow: 'flow1'},
+        {type: 'route', device: 'device1', flow: 'flow1', interface: 0},
+        {type: 'zone', device: 'device1', zone: ''},
+        {type: 'disable', device: 'device1', interface: 0},
+        ...action.payload,
+      ]
     },
     selectNodes: (state, action: PayloadAction<Node[]>) => {
       state.selectedNodes = action.payload
@@ -167,11 +181,40 @@ export const appSlice = createSlice({
     selectEdges: (state, action: PayloadAction<Edge[]>) => {
       state.selectedEdges = action.payload
     },
-    openPolicy: (state) => {
+    openPolicy: (state, action: PayloadAction<PolicyModalUpdate>) => {
       state.policyOpen = true
+      state.policyModal = {...state.policyModal, ...action.payload}
+      
+      if (state.policyModal.mode == 'edit' && state.policyModal.editOriginal) {
+        const original = state.policyModal.editOriginal
+
+        state.policyModal = {
+          ...state.policyModal,
+          type: original.type,
+          deviceName: original.type != 'flow' ? original.device : '',
+          device: original.type != 'flow' ? state.topology.devices.find(d => d.name == original.device) : undefined,
+          interface: (original.type == 'address' ||
+                      original.type == 'route' ||
+                      original.type == 'disable') ? original.interface : -1,
+          address: original.type == 'address' ? original.address : '',
+          flow: original.type == 'flow' ? original.name : 
+                (original.type == 'block' || 
+                original.type == 'route') ? original.flow : '',
+          src_ip: original.type == 'flow' ? original.src_ip : '',
+          dst_ip: original.type == 'flow' ? original.dst_ip : '',
+          protocol: original.type == 'flow' ? original.protocol : '',
+          src_port: original.type == 'flow' ? original.src_port : '',
+          dst_port: original.type == 'flow' ? original.dst_port : '',
+          zone: original.type == 'zone' ? original.zone : '',
+        }
+      }
     },
     closePolicy: (state) => {
       state.policyOpen = false
+      
+      if (state.policyModal.mode == 'edit') {
+        state.policyModal = initialState.policyModal
+      }
     },
     updateModal: (state, action: PayloadAction<PolicyModalUpdate>) => {
       state.policyModal = {...state.policyModal, ...action.payload}
@@ -189,12 +232,24 @@ export const appSlice = createSlice({
     },
     savePolicy: (state) => {
       // TODO: Save policy and send to API
+      const newPolicy = makePolicy(state.policyModal)
+
+      if(state.policyModal.mode == 'create') {
+        state.policies = [...state.policies, newPolicy]
+      } else {
+        state.policies = state.policies.map(p => JSON.stringify(p) === JSON.stringify(state.policyModal.editOriginal) ? newPolicy : p)
+      }
+      
       state.policyOpen = false
+    },
+    deletePolicy: (state, action: PayloadAction<Policy>) => {
+      // TODO: Delete policy and send to API
+      state.policies = state.policies.filter(p => JSON.stringify(p) !== JSON.stringify(action.payload))
     }
   }
 })
 
-export const { loadTopology, loadConfig, loadPolicies, selectNodes, selectEdges, openPolicy, closePolicy, updateModal, discardPolicy, savePolicy } = appSlice.actions
+export const { loadTopology, loadConfig, loadPolicies, selectNodes, selectEdges, openPolicy, closePolicy, updateModal, discardPolicy, savePolicy, deletePolicy } = appSlice.actions
 
 export const topologySelector = (state: { app: AppState }) => state.app.topology;
 export const configSelector = (state: { app: AppState }) => state.app.config;

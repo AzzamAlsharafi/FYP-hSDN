@@ -16,49 +16,51 @@ export default function PolicyModal(){
         <Modal isOpen={open} onClose={() => {dispatch(closePolicy())}}>
             <ModalOverlay />
             <ModalContent>
-                <ModalHeader>Policy</ModalHeader>
+                <ModalHeader>{
+                    modal.mode == 'create' ? 'Create Policy' : 'Edit Policy'
+                }</ModalHeader>
                 <ModalCloseButton />
                 <ModalBody>
-                    <MSelect label='Type' value={modal.type} onChange={(e) => {dispatch(updateModal({type: e.target.value}))}}
-                    options={['Address', 'Flow', 'Block', 'Route', 'Zone', 'Disable']} />
+                    <MSelect2 label='Type' value={modal.type} onChange={(e) => {dispatch(updateModal({type: e.target.value}))}}
+                    options={[['address', 'Address'], ['flow', 'Flow'], ['block', 'Block'], ['route', 'Route'], ['zone', 'Zone'], ['disable', 'Disable']]} />
                     {
                         modal.type ?
                         <Divider/>
                         : <></>
                     }
                     {
-                        modal.type && modal.type != 'Flow' ? 
+                        modal.type && modal.type != 'flow' ? 
                         <MSelect label='Device' value={modal.deviceName} 
                         onChange={(e) => {dispatch(updateModal({deviceName: e.target.value}))}} 
                         options={topology.devices.map((d) => d.name)} />
                         : <></>
                     }
                     {
-                        (modal.type == 'Address' || modal.type == 'Route' || modal.type == 'Disable') && modal.device ?
+                        (modal.type == 'address' || modal.type == 'route' || modal.type == 'disable') && modal.device ?
                         <MSelect2 label="Port" value={modal.interface}
                         onChange={(e) => {dispatch(updateModal({interface: e.target.value}))}}
                         options={modal.device.ports.map((p, index) => [index, p.interface_name])}/>
                         : <></>
                     }
                     {
-                        (modal.type == 'Address') ?
+                        (modal.type == 'address') ?
                         <MInput label="Address" placeholder="X.X.X.X/X" value={modal.address} onChange={(e) => dispatch(updateModal({address: e.target.value}))} />
                         : <></>
                     }
                     {
-                        (modal.type == 'Flow' || modal.type == 'Block' || modal.type == 'Route') ?
+                        (modal.type == 'flow' || modal.type == 'block' || modal.type == 'route') ?
                         <MInput label="Flow Name" placeholder="Type flow name" value={modal.flow}
                         onChange={(e) => dispatch(updateModal({flow: e.target.value}))}/>
                         : <></>
                     }
                     {
-                        (modal.type == 'Zone') ? 
+                        (modal.type == 'zone') ? 
                         <MInput label="Zone" placeholder="Zone name" value={modal.zone} 
                         onChange={(e) => {dispatch(updateModal({zone: e.target.value}))}}/>
                         : <></>
                     }
                     {
-                        (modal.type == 'Flow') ?
+                        (modal.type == 'flow') ?
                         <>
                             <MInput label='Source IP' placeholder="X.X.X.X/X" value={modal.src_ip}
                             onChange={(e) => {dispatch(updateModal({src_ip: e.target.value}))}}/>
