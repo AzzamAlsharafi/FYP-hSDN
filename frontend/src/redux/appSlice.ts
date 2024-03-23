@@ -1,6 +1,6 @@
 import { createSlice, PayloadAction } from '@reduxjs/toolkit'
 import { Edge, Node } from "reactflow";
-import { makePolicy } from '../utils';
+import { makePolicy, policyToWords, sendToApiQueue } from '../utils';
 
 export type Port = {
   interface_name: string,
@@ -223,19 +223,23 @@ export const appSlice = createSlice({
       state.policyOpen = false
     },
     savePolicy: (state) => {
-      // TODO: Save policy and send to API
       const newPolicy = makePolicy(state.policyModal)
 
       if(state.policyModal.mode == 'create') {
+        sendToApiQueue(`policy new ${policyToWords(newPolicy)}`)
+
         state.policies = [...state.policies, newPolicy]
       } else {
+        sendToApiQueue(`policy edit ${policyToWords(newPolicy)} old ${policyToWords(state.policyModal.editOriginal!)}`)
+        
         state.policies = state.policies.map(p => JSON.stringify(p) === JSON.stringify(state.policyModal.editOriginal) ? newPolicy : p)
       }
       
       state.policyOpen = false
     },
     deletePolicy: (state, action: PayloadAction<Policy>) => {
-      // TODO: Delete policy and send to API
+      sendToApiQueue(`policy delete ${policyToWords(action.payload)}`)
+      
       state.policies = state.policies.filter(p => JSON.stringify(p) !== JSON.stringify(action.payload))
     }
   }

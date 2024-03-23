@@ -131,3 +131,37 @@ function getProtocol(proto: string){
         return `IP(${proto})`;
     }
 }
+
+const url = import.meta.env.VITE_URL;
+
+const headers = {
+    "Content-Type": "application/json",                                                                                                
+    "Access-Control-Origin": "*"
+}
+
+export function sendToApiQueue(line: string){
+    fetch(`${url}/queue`, {
+        method: "POST",
+        headers: headers,
+        body: JSON.stringify([line])
+    }).then((response) => {
+        console.log(response.body)
+    })
+}
+
+export function policyToWords(policy: Policy){
+    switch (policy.type){
+        case 'address':
+            return `${policy.type} ${policy.device} ${policy.interface} ${policy.address}`
+        case 'flow':
+            return `${policy.type} ${policy.name} ${policy.src_ip} ${policy.dst_ip} ${policy.protocol} ${policy.src_port} ${policy.dst_port}`
+        case 'block':
+            return `${policy.type} ${policy.device} ${policy.flow}`
+        case 'route':
+            return `${policy.type} ${policy.device} ${policy.flow} ${policy.interface}`
+        case 'zone':
+            return `${policy.type} ${policy.device}`
+        default:
+            return `${policy.type} ${policy.device} ${policy.interface}`
+    }
+}
