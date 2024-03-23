@@ -35,6 +35,8 @@ policies = {
     "policies": []
 }
 
+queue = []
+
 @app.get("/")
 def read_root():
     return {"Hello": "Ryu"}
@@ -72,4 +74,15 @@ def update_policies(new_policies: List[dict]):
     policies["policies"] = new_policies
     return {"policies": policies}
 
-uvicorn.run(app, host=host.host)
+@app.get("/queue")
+def read_queue():
+    read = queue.copy()
+    queue.clear()
+    return read
+
+@app.post("/queue")
+def update_queue(new_queue: List[str]):
+    queue.extend(new_queue)
+    return {"queue": queue}
+
+uvicorn.run(app, host=host.host, log_level="warning")

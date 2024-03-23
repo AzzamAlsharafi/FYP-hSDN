@@ -1,21 +1,29 @@
 import logging
+import time
 import requests
 
 from ryu.base import app_manager
 from ryu.controller.handler import set_ev_cls
 
-from src.events import EventPolicies, EventTopology, EventClassicConfigurations, EventSdnConfigurations
+from ryu.lib import hub
+from src.events import EventPolicies, EventPolicyAPI, EventTopology, EventClassicConfigurations, EventSdnConfigurations
 import src.api.host as host
 
 url = f'http://{host.host}:8000'
 
 # Responsible for communication between Ryu and FastAPI
 class ApiConnector(app_manager.RyuApp):
+    _EVENTS = [EventPolicyAPI]
 
     def __init__(self, *args, **kwargs):
         super(ApiConnector, self).__init__(*args, **kwargs)
 
         self.logger.setLevel(logging.INFO)
+    
+    def start(self):
+        super(ApiConnector, self).start()
+
+        self.task = hub.spawn(self.run)
 
     @set_ev_cls(EventTopology)
     def topology_handler(self, ev):        
@@ -57,3 +65,34 @@ class ApiConnector(app_manager.RyuApp):
             requests.put(f'{url}/policies', json=policies)
         except Exception as e:
             self.logger.error(f'Failed to send policies to API: {str(e)}')
+    
+    def run(self):
+        interval = 1
+
+        while True:
+            start = time.time()
+            self.collect_queue()
+            end = time.time()
+            
+            if (end - start) < interval:
+                hub.sleep(interval - (end - start))
+    
+    def collect_queue(self):
+        try:
+            content = requests.get(f'{url}/queue').content.decode('utf-8')
+            if len(content) < 3:
+                return
+            
+            queue = list(map(lambda x: x[1:-1], content[1:-1].split(',')))
+            
+            for element in queue:
+                self.process_element(element)
+
+        except Exception as e:
+            self.logger.error(f'Failed to read queue from API: {str(e)}')
+    
+    def process_element(self, element):
+        words = element.split(' ')
+
+        if words[0] == 'policy':
+            self.send_event_to_observers(EventPolicyAPI(words[1:]))

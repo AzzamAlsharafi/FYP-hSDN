@@ -54,3 +54,9 @@ class EventNetconfConfigurations(EventBase):
     def __init__(self, configurations):
         super(EventNetconfConfigurations, self).__init__()
         self.configurations = configurations
+
+# Event containing policy sent from API to PolicyManager
+class EventPolicyAPI(EventBase):
+    def __init__(self, words):
+        super(EventPolicyAPI, self).__init__()
+        self.words = words
