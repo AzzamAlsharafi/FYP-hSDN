@@ -1,11 +1,12 @@
 import { FormControl, FormLabel, Select } from "@chakra-ui/react";
 
-export function MSelect(props: {label: string, value: string | number, onChange: (e: any) => void, options: string[]}) {
+export function MSelect(props: {label: string, value: string | number, onChange?: (e: any) => void, options: string[], disabled?: boolean}) {
     return <FormControl padding='10px 0px'>
             <FormLabel>
                 {props.label}
             </FormLabel>
-            <Select placeholder={`Select ${props.label.toLowerCase()}`} value={props.value} onChange={props.onChange}>
+            <Select placeholder={`Select ${props.label.toLowerCase()}`} value={props.value} onChange={props.onChange}
+            disabled={props.disabled}>
                 {
                     props.options.map((option) => {
                         return <option key={option}>{option}</option>

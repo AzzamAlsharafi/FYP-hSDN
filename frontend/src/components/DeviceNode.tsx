@@ -1,11 +1,15 @@
-import { Handle, NodeProps, Position } from "reactflow";
-import { Device } from "../redux/appSlice";
-import { Box, Center } from "@chakra-ui/react";
+import { Handle, NodeProps, NodeToolbar, Position } from "reactflow";
+import { Device, deleteDevice, openDevice } from "../redux/appSlice";
+import { Box, Center, IconButton } from "@chakra-ui/react";
 import RouterIcon from "./RouterIcon";
+import { DeleteIcon, EditIcon } from "@chakra-ui/icons";
+import { useAppDispatch } from "../redux/hooks";
 
 export default function DeviceNode(props: NodeProps<Device>) {
     const bg = props.data.type == 'Classic' ? 'bg.classic' : 'bg.sdn'
     const border = props.data.type == 'Classic' ? 'border.classic' : 'border.sdn'
+    
+    const dispatch = useAppDispatch();
 
     return (
         <Box>
@@ -30,6 +34,19 @@ export default function DeviceNode(props: NodeProps<Device>) {
             <Box textAlign='center' fontWeight='bold'>
                 {props.data.name}
             </Box>
+            <NodeToolbar position={Position.Top}>
+                <IconButton aria-label="edit" size='sm' icon={<EditIcon />} marginX='5px'
+                onClick={() => {dispatch(openDevice({
+                    mode: 'edit',
+                    editOriginal: props.data
+                }))}} />
+                {
+                    props.data.type == 'Classic' ?
+                    <IconButton aria-label="delete" size='sm' icon={<DeleteIcon />}
+                    onClick={() => {dispatch(deleteDevice(props.data))}}/>
+                    : <></>
+                }
+            </NodeToolbar>
         </Box>
     )
 }
