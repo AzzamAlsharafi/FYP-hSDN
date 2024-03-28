@@ -25,8 +25,8 @@ class NetconfController(app_manager.RyuApp):
         self.devices = []
 
         line_count = 0
-        user = ''
-        password = ''
+        self.nc_user = ''
+        self.nc_password = ''
 
         with open('config/netconf.txt', 'r') as file:
             for line in file.read().splitlines():
@@ -34,17 +34,17 @@ class NetconfController(app_manager.RyuApp):
                     continue
                 
                 if line_count == 0:
-                    user = line.split('=')[1].strip()
+                    self.nc_user = line.split('=')[1].strip()
                     line_count += 1
                 elif line_count == 1:
-                    password = line.split('=')[1].strip()
+                    self.nc_password = line.split('=')[1].strip()
                     line_count += 1
                 else:
                     split = line.split(' ')
                     address = split[0]
                     host = split[1]
                     if re.match(r'^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$', address): # Regex for IPv4 address
-                        self.devices.append(Device(address, host, user, password))
+                        self.devices.append(Device(address, host, self.nc_user, self.nc_password))
                     else:
                         self.logger.error(f'Invalid device configuration: {line}')
     
@@ -87,7 +87,16 @@ class NetconfController(app_manager.RyuApp):
         words = ev.words
 
         if words[0] == 'new':
-            pass
+            name = words[1]
+            ip = words[2]
+
+            self.devices.append(Device(ip, name, self.nc_user, self.nc_password))
+
+            lines = []
+
+            with open('config/netconf.txt', 'a') as file:
+                file.write(f'{ip} {name}\n')
+
         elif words[0] == 'edit':
             separator = words.index('old')
             new_name = ' '.join(words[1:separator])
@@ -112,7 +121,21 @@ class NetconfController(app_manager.RyuApp):
             self.send_event_to_observers(EventPolicyDeviceAPI(old_name, new_name))
             
         elif words[0] == 'delete':
-            pass
+            device = next((d for d in self.devices if d.hostname == words[1]))
+            name = device.hostname
+            ip = device.ip_address
+
+            self.devices.remove(device)
+
+            lines = []
+
+            with open('config/netconf.txt', 'r') as file:
+                for line in file.readlines():
+                    if line.strip() != f'{ip} {name}':
+                        lines.append(line)
+            
+            with open('config/netconf.txt', 'w') as file:
+                file.writelines(lines)
 
 
 class Device:
