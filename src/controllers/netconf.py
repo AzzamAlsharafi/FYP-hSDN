@@ -6,10 +6,12 @@ from ryu.base import app_manager
 from ncclient import manager
 from ryu.controller.handler import set_ev_cls
 
-from src.events import RequestNetconfDiscovery, ReplyNetconfDiscovery, EventNetconfConfigurations
+from src.events import EventClassicDeviceAPI, EventPolicyDeviceAPI, RequestNetconfDiscovery, ReplyNetconfDiscovery, EventNetconfConfigurations
 
 # Responsible for managing NETCONF communication with NETCONF devices
 class NetconfController(app_manager.RyuApp):
+    _EVENTS = [EventPolicyDeviceAPI]
+
     def __init__(self, *args, **kwargs):
         super(NetconfController, self).__init__(*args, **kwargs)
 
@@ -78,6 +80,39 @@ class NetconfController(app_manager.RyuApp):
             if device and device.manager:
                 for conf in configurations[device_name]:
                     device.configure(conf)
+    
+    # Run device instruction from API
+    @set_ev_cls(EventClassicDeviceAPI)
+    def process_device_api(self, ev):
+        words = ev.words
+
+        if words[0] == 'new':
+            pass
+        elif words[0] == 'edit':
+            separator = words.index('old')
+            new_name = ' '.join(words[1:separator])
+            old_name = ' '.join(words[separator+1:])
+
+            device = next((d for d in self.devices if d.hostname == old_name), None)
+
+            device.hostname = new_name
+
+            lines = []
+
+            with open('config/netconf.txt', 'r') as file:
+                for line in file.readlines():
+                    if line.strip() == f'{device.ip_address} {old_name}':
+                        lines.append(f'{device.ip_address} {new_name}\n')
+                    else:
+                        lines.append(line)
+            
+            with open('config/netconf.txt', 'w') as file:
+                file.writelines(lines)
+
+            self.send_event_to_observers(EventPolicyDeviceAPI(old_name, new_name))
+            
+        elif words[0] == 'delete':
+            pass
 
 
 class Device:

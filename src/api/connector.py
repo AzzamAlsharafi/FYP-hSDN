@@ -6,14 +6,14 @@ from ryu.base import app_manager
 from ryu.controller.handler import set_ev_cls
 
 from ryu.lib import hub
-from src.events import EventPolicies, EventPolicyAPI, EventTopology, EventClassicConfigurations, EventSdnConfigurations
+from src.events import EventClassicDeviceAPI, EventPolicies, EventPolicyAPI, EventSdnDeviceAPI, EventTopology, EventClassicConfigurations, EventSdnConfigurations
 import src.api.host as host
 
 url = f'http://{host.host}:8000'
 
 # Responsible for communication between Ryu and FastAPI
 class ApiConnector(app_manager.RyuApp):
-    _EVENTS = [EventPolicyAPI]
+    _EVENTS = [EventPolicyAPI, EventClassicDeviceAPI, EventSdnDeviceAPI]
 
     def __init__(self, *args, **kwargs):
         super(ApiConnector, self).__init__(*args, **kwargs)
@@ -93,6 +93,11 @@ class ApiConnector(app_manager.RyuApp):
     
     def process_element(self, element):
         words = element.split(' ')
-
+        
         if words[0] == 'policy':
             self.send_event_to_observers(EventPolicyAPI(words[1:]))
+        elif words[0] == 'device':
+            if words[1] == 'Classic':
+                self.send_event_to_observers(EventClassicDeviceAPI(words[2:]))
+            elif words[1] == 'SDN':
+                self.send_event_to_observers(EventSdnDeviceAPI(words[2:]))

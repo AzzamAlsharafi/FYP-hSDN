@@ -60,3 +60,22 @@ class EventPolicyAPI(EventBase):
     def __init__(self, words):
         super(EventPolicyAPI, self).__init__()
         self.words = words
+
+# Event containing classic device instructions sent from API
+class EventClassicDeviceAPI(EventBase):
+    def __init__(self, words):
+        super(EventClassicDeviceAPI, self).__init__()
+        self.words = words
+
+# Event containing SDN device instructions sent from API
+class EventSdnDeviceAPI(EventBase):
+    def __init__(self, words):
+        super(EventSdnDeviceAPI, self).__init__()
+        self.words = words
+
+# Event to edit device name in policies
+class EventPolicyDeviceAPI(EventBase):
+    def __init__(self, old_device, new_device):
+        super(EventPolicyDeviceAPI, self).__init__()
+        self.old_device = old_device
+        self.new_device = new_device

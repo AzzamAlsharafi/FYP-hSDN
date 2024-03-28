@@ -5,7 +5,7 @@ from ryu.base import app_manager
 from policies import AddressPolicy, FlowPolicy, BlockPolicy, RoutePolicy, ZonePolicy, DisablePolicy
 
 from ryu.controller.handler import set_ev_cls
-from src.events import EventPolicies, EventPolicyAPI
+from src.events import EventPolicies, EventPolicyAPI, EventPolicyDeviceAPI
 
 # Responsible for managing user-defined policies, and sending them to ConfigurationGenerator
 class PolicyManager(app_manager.RyuApp):
@@ -156,6 +156,33 @@ class PolicyManager(app_manager.RyuApp):
             self.logger.error(f'Invalid policy action from API: {words[0]}')
         
         self.send_policies()
+
+    @set_ev_cls(EventPolicyDeviceAPI)
+    def edit_policy_device(self, ev):
+        old_device = ev.old_device
+        new_device = ev.new_device
+
+        for policy in self.policies:
+            if policy.device == old_device:
+                policy.device = new_device
+
+        lines = []
+
+        with open('config/policy.txt', 'r') as file:
+            for line in file.readlines():
+                words = line.split(' ')
+                if line.strip() == '' or line[0] == '#':
+                    lines.append(line)
+                elif words[1] == old_device:
+                    words[1] = new_device
+                    lines.append(' '.join(words) + '\n')
+                else:
+                    lines.append(line)
+        
+        self.send_policies()
+        
+        with open('config/policy.txt', 'w') as file:
+            file.writelines(lines)
 
     # Send policies to ConfigurationGenerator
     def send_policies(self):

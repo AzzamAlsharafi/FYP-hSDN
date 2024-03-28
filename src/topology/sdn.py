@@ -10,11 +10,11 @@ from ryu.ofproto import ofproto_v1_3
 from scapy.layers.l2 import Ether, ARP
 from scapy.contrib import lldp
 
-from src.events import EventSdnTopology, EventSdnConfigurations
+from src.events import EventPolicyDeviceAPI, EventSdnDeviceAPI, EventSdnTopology, EventSdnConfigurations
 
 # Handles topology discovery for SDN (OpenFlow) devices
 class SdnTopologyDiscovery(app_manager.RyuApp):
-    _EVENTS = [EventSdnTopology]
+    _EVENTS = [EventSdnTopology, EventPolicyDeviceAPI]
 
     OFP_VERSIONS = [ofproto_v1_3.OFP_VERSION]
 
@@ -54,7 +54,40 @@ class SdnTopologyDiscovery(app_manager.RyuApp):
         for label in configurations:
             for config in configurations[label]:
                 self.configure(label, config)
-        
+    
+    # Run device instruction from API
+    @set_ev_cls(EventSdnDeviceAPI)
+    def process_device_api(self, ev):
+        words = ev.words
+
+        if words[0] == 'edit':
+            separator = words.index('old')
+            new_name = ' '.join(words[1:separator])
+            old_name = ' '.join(words[separator+1:])
+
+            self.datapaths[new_name] = self.datapaths.pop(old_name)
+            dp = self.datapaths[new_name]
+
+            self.labels[dp.id] = new_name
+            self.all_labels[dp.id] = new_name
+            
+            self.ports[new_name] = self.ports.pop(old_name)
+            self.lldp[new_name] = self.lldp.pop(old_name)
+
+            lines = []
+
+            with open('config/sdn.txt', 'r') as file:
+                for line in file.readlines():
+                    if line.strip() == f'{dp.id}:{old_name}':
+                        lines.append(f'{dp.id}:{new_name}\n')
+                    else:
+                        lines.append(line)
+            
+            with open('config/sdn.txt', 'w') as file:
+                file.writelines(lines)
+
+            self.send_event_to_observers(EventPolicyDeviceAPI(old_name, new_name))
+
     # Configure device
     def configure(self, label, config):
         if label in self.configurations and config in self.configurations[label]:
