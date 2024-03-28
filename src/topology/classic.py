@@ -21,9 +21,9 @@ class ClassicTopologyDiscovery(app_manager.RyuApp):
         # Runs topology discovery in separate thread, otherwise it would block Ryu
         self.task = hub.spawn(self.run)
 
-    # Continuously calls NetconfController to run topology discovery every 30 seconds
+    # Continuously calls NetconfController to run topology discovery every 1 second
     def run(self):
-        interval = 15
+        interval = 1
         
         while True:
             start = time.time()
