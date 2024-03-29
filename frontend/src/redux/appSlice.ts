@@ -59,7 +59,7 @@ export type FlowPolicy = {
 
 export type BlockPolicy = {
   type: 'block',
-  device: string,
+  target: string,
   flow: string,
 }
 
@@ -208,8 +208,11 @@ export const appSlice = createSlice({
         state.policyModal = {
           ...state.policyModal,
           type: original.type,
-          deviceName: original.type != 'flow' ? original.device : '',
-          device: original.type != 'flow' ? state.topology.devices.find(d => d.name == original.device) : undefined,
+          deviceName: original.type == 'flow' ? '' : 
+                      original.type == 'block' ? original.target : original.device,
+          device: original.type == 'flow' ?  undefined :
+                  original.type == 'block' ? state.topology.devices.find(d => d.name == original.target) : 
+                  state.topology.devices.find(d => d.name == original.device),
           interface: (original.type == 'address' ||
                       original.type == 'route' ||
                       original.type == 'disable') ? original.interface : -1,
@@ -310,7 +313,7 @@ export const appSlice = createSlice({
       state.deviceOpen = false
       state.deviceModal = initialState.deviceModal
     },
-    deleteDevice: (state, action: PayloadAction<Device>) => {
+    deleteDevice: (_, action: PayloadAction<Device>) => {
       sendToApiQueue(`device ${action.payload.type} delete ${action.payload.name}`)
       // TODO: delete device from frontend or wait for backend to update
     }

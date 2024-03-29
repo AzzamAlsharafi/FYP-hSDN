@@ -10,7 +10,9 @@ export default function PoliciesList() {
 
     return <>
         {policies.map((policy, _) => {
-            const name = policy.type == 'flow' ? policy.name : policy.device;
+            const name = policy.type == 'flow' ? policy.name : 
+                        policy.type == 'block' ? policy.target : 
+                        policy.device;
             const content = getPolicyContent(policy)
             
             return <Flex key={`${policy.type}-${name}-${content}`}>

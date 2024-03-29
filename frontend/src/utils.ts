@@ -88,7 +88,7 @@ export function makePolicy(modal: PolicyModal): Policy{
         case 'block':
             return {
                 type: 'block',
-                device: modal.deviceName,
+                target: modal.deviceName,
                 flow: modal.flow
             }
         case 'route':
@@ -156,11 +156,11 @@ export function policyToWords(policy: Policy){
         case 'flow':
             return `${policy.type} ${policy.name} ${policy.src_ip} ${policy.dst_ip} ${policy.protocol} ${policy.src_port} ${policy.dst_port}`
         case 'block':
-            return `${policy.type} ${policy.device} ${policy.flow}`
+            return `${policy.type} ${policy.target} ${policy.flow}`
         case 'route':
             return `${policy.type} ${policy.device} ${policy.flow} ${policy.interface}`
         case 'zone':
-            return `${policy.type} ${policy.device}`
+            return `${policy.type} ${policy.device} ${policy.zone}`
         default:
             return `${policy.type} ${policy.device} ${policy.interface}`
     }
