@@ -34,14 +34,17 @@ class ConfigurationGenerator(app_manager.RyuApp):
         # Link addresses 2D dictionary. First key is device with lower name (using sorted()).
         # {'C1-GigabitEthernet1': {'C2-GigabitEthernet1': ('192.168.99.1/30', '192.168.99.2/30'), ....}, ...}'
         self.link_addresses = {}
+
+        self.flows = {}
+        self.zones = {}
     
     # Listens for policies from PolicyManager
     @set_ev_cls(EventPolicies)
     def policies_handler(self, ev):
         # TODO: confirm == is actually running as intended
-        if not self.policies == ev.policies:
-            self.policies = ev.policies
-            self.update()
+        # if not self.policies == ev.policies: # This is resulting in False always for some reason
+        self.policies = ev.policies
+        self.update()
     
     # Listens for topology from TopologyManager
     @set_ev_cls(EventTopology)
@@ -64,6 +67,8 @@ class ConfigurationGenerator(app_manager.RyuApp):
 
         self.addresses = {}
         self.configurations = {}
+        self.flows = {}
+        self.zones = {}
 
         for policy in self.policies:
             self.apply_policy(policy)
@@ -78,6 +83,18 @@ class ConfigurationGenerator(app_manager.RyuApp):
     def apply_policy(self, policy):
         if policy.type == 'address':
             self.apply_address_policy(policy)
+        elif policy.type == 'flow':
+            self.apply_flow_policy(policy)
+        elif policy.type == 'block':
+            self.apply_block_policy(policy)
+        elif policy.type == 'route':
+            self.apply_route_policy(policy)
+        elif policy.type == 'zone':
+            self.apply_zone_policy(policy)
+        elif policy.type == 'disable':
+            self.apply_disable_policy(policy)
+        else:
+            self.logger.error(f'Invalid policy type in ConfigurationGenerator: {policy.type}')
     
     def apply_address_policy(self, policy):
         device = policy.device
@@ -102,6 +119,65 @@ class ConfigurationGenerator(app_manager.RyuApp):
             self.logger.debug(f'Added AddressPolicy for {device}: {add}')
         else:
             self.logger.debug(f'Skipped AddressPolicy: {policy.device} {policy.interface} {policy.address}')
+
+    def apply_flow_policy(self, policy):
+        self.flows[policy.name] = (policy.src_ip, policy.dst_ip, policy.protocol, policy.src_port, policy.dst_port)
+
+    def apply_block_policy(self, policy):
+        if policy.target in self.zones:
+            for device in self.zones[policy.target]:
+                self.apply_block_policy_device(policy, device)
+        else:
+            self.apply_block_policy_device(policy, policy.target)
+
+    def apply_block_policy_device(self, policy, device):            
+        if policy.flow in self.flows:
+            (src_ip, dst_ip, protocol, src_port, dst_port) = self.flows[policy.flow]
+            
+            conf = f'block {src_ip} {dst_ip} {protocol} {src_port} {dst_port}'
+            self.append_dict_list(self.configurations, device, conf)
+
+    def apply_route_policy(self, policy):
+        device = policy.device
+
+        interface = policy.interface
+
+        d = self.get_device(device)
+
+        if d and (len(d['ports']) > interface):            
+            port = d['ports'][interface]
+
+            if d['type'] == 'Classic':
+                port = port['interface_name']
+            else:
+                port = port['port_no']
+            
+            if policy.flow in self.flows:
+                (src_ip, dst_ip, protocol, src_port, dst_port) = self.flows[policy.flow]
+                
+                conf = f'route-f {src_ip} {dst_ip} {protocol} {src_port} {dst_port} {port}'
+                self.append_dict_list(self.configurations, device, conf)
+
+    def apply_zone_policy(self, policy):
+        self.append_dict_list(self.zones, policy.zone, policy.device)
+
+    def apply_disable_policy(self, policy):
+        device = policy.device
+
+        interface = policy.interface
+
+        d = self.get_device(device)
+
+        if d and (len(d['ports']) > interface):            
+            port = d['ports'][interface]
+
+            if d['type'] == 'Classic':
+                port = port['interface_name']
+            else:
+                port = port['port_no']
+            
+            conf = f'disable {port}'
+            self.append_dict_list(self.configurations, device, conf)
 
     # Run global routing algorithm based on collected address policies
     def global_routing(self):

@@ -60,7 +60,7 @@ class RoutePolicy(Policy):
         super(RoutePolicy, self).__init__('route')
         self.device = device
         self.flow = flow
-        self.interface = interface
+        self.interface = int(interface)
 
     def __str__(self):
         return f'RoutePolicy: {self.device} {self.flow} {self.interface}'
@@ -80,7 +80,7 @@ class DisablePolicy(Policy):
     def __init__(self, device, interface):
         super(DisablePolicy, self).__init__('disable')
         self.device = device
-        self.interface = interface
+        self.interface = int(interface)
 
     def __str__(self):
         return f'DisablePolicy: {self.device} {self.interface}'
