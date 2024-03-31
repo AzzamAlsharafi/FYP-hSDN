@@ -150,6 +150,7 @@ class Device:
         self.neighbors = {} # {neighbor_name: interface_name, ...}
 
         self.configurations = [] # List of applied device configurations
+        self.acl_statements = 0 # Number of ACL statements
 
         self.logger = logging.getLogger(f'NetconfController-{self.ip_address}')
         self.logger.setLevel(logging.INFO)
@@ -187,6 +188,13 @@ class Device:
 
             if self.configure_route(destination, prefix, interface, next_hop, next_hop_prefix):
                 self.configurations.append(conf) # Add successful configuration
+
+        elif split[0] == 'block':
+            (src_ip, dst_ip, proto, src_port, dst_port) = split[1:]
+
+            if self.configure_block(src_ip, dst_ip, proto, src_port, dst_port, deconf=deconf):
+                self.configurations.append(conf)
+        
         else:
             self.logger.error(f'Invalid configuration for device {self.hostname}: {conf}')
 
@@ -290,9 +298,20 @@ class Device:
                             </interfaces>
                         </filter>
                         '''
+        
+        acl_filter = '''
+                    <filter xmlns="urn:ietf:params:xml:ns:netconf:base:1.0">
+                        <acl xmlns="http://openconfig.net/yang/acl">
+                            <interfaces>
+                            </interfaces>
+                        </acl>
+                    </filter>
+                    '''
+
         try:
             lldp_reply = ET.fromstring(self.manager.get(lldp_filter).data_xml)
             interfaces_reply = ET.fromstring(self.manager.get(interfaces_filter).data_xml)
+            acl_reply = ET.fromstring(self.manager.get(acl_filter).data_xml)
 
             disabled_interfaces = []
 
@@ -307,6 +326,11 @@ class Device:
                 non_lldp_interface = interfaces_reply.find('.//{http://openconfig.net/yang/interfaces}interface[{http://openconfig.net/yang/interfaces}name="' + interface_name +'"]')
 
                 mac_address = non_lldp_interface.find('.//{http://openconfig.net/yang/interfaces/ethernet}mac-address').text
+
+                # Make sure ACL is applied to interface when there is ACL statements
+                if self.acl_statements > 0:
+                    if acl_reply.find('.//{http://openconfig.net/yang/acl}interface[{http://openconfig.net/yang/acl}id="' + interface_name + '"]') is None:
+                        self.apply_acl_interface(interface_name)
 
                 # Add interface to interfaces
                 self.interfaces.append({'interface_name': interface_name, 'hw_addr': mac_address})
@@ -484,6 +508,115 @@ class Device:
             self.logger.error(f'Failed to configure route {destination}/{prefix} via {next_hop} on {interface} on {self.ip_address} ({self.hostname}): {str(e)}')
 
             return False
+    
+    # Configure block on device
+    def configure_block(self, src_ip, dst_ip, proto, src_port, dst_port, deconf=False):
+        acl_name = f'ACL_{self.hostname}'
+        sequence_id = (self.acl_statements * 10) + 10
+
+        src_ip = src_ip if src_ip != '*' else '0.0.0.0/0'
+        dst_ip = dst_ip if dst_ip != '*' else '0.0.0.0/0'
+        src_port = src_port if src_port != '*' else 'ANY'
+        dst_port = dst_port if dst_port != '*' else 'ANY'
+
+        proto_line = f'<protocol>{proto}</protocol>' if proto != '*' else ''
+
+        config = f'''
+                    <config xmlns="urn:ietf:params:xml:ns:netconf:base:1.0">
+                        <acl xmlns="http://openconfig.net/yang/acl">
+                            <acl-sets>
+                                <acl-set>
+                                    <name>{acl_name}</name>
+                                    <type>ACL_IPV4</type>
+                                    <config>
+                                        <name>{acl_name}</name>
+                                        <type>ACL_IPV4</type>
+                                    </config>
+                                    <acl-entries>
+                                        <acl-entry>
+                                            <sequence-id>{sequence_id}</sequence-id>
+                                            <config>
+                                                <sequence-id>{sequence_id}</sequence-id>
+                                            </config>
+                                            <ipv4>
+                                                <config>
+                                                    <source-address>{src_ip}</source-address>
+                                                    <destination-address>{dst_ip}</destination-address>
+                                                    {proto_line}
+                                                </config>
+                                            </ipv4>
+                                            <transport>
+                                                <config>
+                                                    <source-port>{src_port}</source-port>
+                                                    <destination-port>{dst_port}</destination-port>
+                                                </config>
+                                            </transport>
+                                            <actions>
+                                                <config>
+                                                    <forwarding-action>DROP</forwarding-action>
+                                                    <log-action>LOG_NONE</log-action>
+                                                </config>
+                                            </actions>
+                                        </acl-entry>
+                                    </acl-entries>
+                                </acl-set>
+                            </acl-sets>
+                        </acl>
+                    </config>
+        '''
+
+        try:
+            self.manager.edit_config(config=config)
+            self.manager.commit()
+            self.acl_statements += 1
+
+            self.logger.debug(f'Configured block {src_ip} {dst_ip} {proto} {src_port} {dst_port} on {self.ip_address} ({self.hostname})')
+
+            return True
+        except Exception as e:
+            self.logger.error(f'Failed to configure block {src_ip} {dst_ip} {proto} {src_port} {dst_port} on {self.ip_address} ({self.hostname}): {str(e)}')
+
+            return False
+    
+    def apply_acl_interface(self, interface):
+        config = f'''
+                    <config xmlns="urn:ietf:params:xml:ns:netconf:base:1.0">
+                        <acl xmlns="http://openconfig.net/yang/acl">
+                            <interfaces>
+                                <interface>
+                                    <id>{interface}</id>
+                                    <config>
+                                        <id>{interface}</id>
+                                    </config>
+                                    <interface-ref>
+                                        <config>
+                                            <interface>{interface}</interface>
+                                            <subinterface>0</subinterface>
+                                        </config>
+                                    </interface-ref>
+                                    <egress-acl-sets>
+                                        <egress-acl-set>
+                                            <set-name>ACL_{self.hostname}</set-name>
+                                            <type>ACL_IPV4</type>
+                                            <config>
+                                                <set-name>ACL_{self.hostname}</set-name>
+                                                <type>ACL_IPV4</type>
+                                            </config>
+                                        </egress-acl-set>
+                                    </egress-acl-sets>
+                                </interface>
+                            </interfaces>
+                        </acl>
+                    </config>
+        '''
+
+        try:
+            self.manager.edit_config(config=config)
+            self.manager.commit()
+
+            self.logger.debug(f'Configured ACL on interface {interface} on {self.ip_address} ({self.hostname})')
+        except Exception as e:
+            self.logger.error(f'Failed to configure ACL on interface  {interface} on {self.ip_address} ({self.hostname}): {str(e)}')    
 
     # TODO: Move to a helper class
     # Get network address from host address and prefix
