@@ -78,8 +78,7 @@ class NetconfController(app_manager.RyuApp):
             device = next((d for d in self.devices if d.hostname == device_name), None)
 
             if device and device.manager:
-                for conf in configurations[device_name]:
-                    device.configure(conf)
+                device.configure_list(configurations[device_name])
     
     # Run device instruction from API
     @set_ev_cls(EventClassicDeviceAPI)
@@ -164,10 +163,20 @@ class Device:
         else: # LLDP enabled, discover neighbors
             self.get_neighbors()
 
-    # TODO: handle chaning configurations. Deconfigure old and configure new. (?)
-    # Configure device with received configuration
-    def configure(self, conf):
-        if conf in self.configurations:
+    # Configure list of configurations. Deconfigure old and configure new.
+    def configure_list(self, confs):
+        self.logger.debug(f'Configuring device {self.hostname} with [NEW] {confs}. [OLD] {self.configurations}.')
+
+        for conf in self.configurations:
+            if conf not in confs:
+                self.configure(conf, deconf=True)
+
+        for conf in confs:
+            self.configure(conf)
+
+    # Configure/deconfigure device with received configuration
+    def configure(self, conf, deconf=False):
+        if not deconf and conf in self.configurations:
             return # Configuration already applied
 
         split = conf.split(' ')
@@ -176,8 +185,11 @@ class Device:
             interface = split[1]
             (address, prefix) = split[2].split('/')
 
-            if self.configure_address(interface, address, prefix):
-                self.configurations.append(conf) # Add successful configuration
+            if self.configure_address(interface, address, prefix, deconf=deconf):
+                if deconf:
+                    self.configurations.remove(conf)
+                else:
+                    self.configurations.append(conf)
 
         elif split[0] == 'route':
             (address, prefix) = split[1].split('/')
@@ -186,14 +198,14 @@ class Device:
             interface = split[2]
             (next_hop, next_hop_prefix) = split[3].split('/')
 
-            if self.configure_route(destination, prefix, interface, next_hop, next_hop_prefix):
-                self.configurations.append(conf) # Add successful configuration
+            # if self.configure_route(destination, prefix, interface, next_hop, next_hop_prefix, deconf=deconf):
+            #     self.configurations.append(conf) # Add successful configuration
 
         elif split[0] == 'block':
             (src_ip, dst_ip, proto, src_port, dst_port) = split[1:]
 
-            if self.configure_block(src_ip, dst_ip, proto, src_port, dst_port, deconf=deconf):
-                self.configurations.append(conf)
+            # if self.configure_block(src_ip, dst_ip, proto, src_port, dst_port, deconf=deconf):
+            #     self.configurations.append(conf)
         
         else:
             self.logger.error(f'Invalid configuration for device {self.hostname}: {conf}')
@@ -210,11 +222,16 @@ class Device:
                 timeout=10
             )
             self.logger.debug(f'Established NETCONF connection with {self.ip_address} ({self.hostname})')
+            self.load_configurations()
             self.enable_lldp()
         except Exception as e:
             # Use debug instead of error, as it's expected that some devices will be unreachable (e.g. shutdown)
             self.logger.debug(f'Failed to establish NETCONF connection with {self.ip_address} ({self.hostname}): {str(e)}')
     
+    # Load device configurations
+    def load_configurations(self):
+        self.load_configured_addresses()
+
     # Enable LLDP on device
     def enable_lldp(self):
         filter = '''
@@ -327,10 +344,13 @@ class Device:
 
                 mac_address = non_lldp_interface.find('.//{http://openconfig.net/yang/interfaces/ethernet}mac-address').text
 
-                # Make sure ACL is applied to interface when there is ACL statements
+                # Make sure ACL is applied/not applied to interface when there is (no) ACL statements
                 if self.acl_statements > 0:
                     if acl_reply.find('.//{http://openconfig.net/yang/acl}interface[{http://openconfig.net/yang/acl}id="' + interface_name + '"]') is None:
                         self.apply_acl_interface(interface_name)
+                else:
+                    if acl_reply.find('.//{http://openconfig.net/yang/acl}interface[{http://openconfig.net/yang/acl}id="' + interface_name + '"]') is not None:
+                        self.apply_acl_interface(interface_name, deconf=True)
 
                 # Add interface to interfaces
                 self.interfaces.append({'interface_name': interface_name, 'hw_addr': mac_address})
@@ -416,7 +436,9 @@ class Device:
         self.manager.commit()
     
     # Configure address on interface
-    def configure_address(self, interface, address, prefix):
+    def configure_address(self, interface, address, prefix, deconf=False):
+        deconf_str = ' operation="delete"' if deconf else ''
+
         config = f'''
                     <config xmlns="urn:ietf:params:xml:ns:netconf:base:1.0">
                         <interfaces xmlns="http://openconfig.net/yang/interfaces">
@@ -426,7 +448,7 @@ class Device:
                                     <subinterface>
                                         <index>0</index>
                                         <ipv4 xmlns="http://openconfig.net/yang/interfaces/ip">
-                                            <addresses>
+                                            <addresses{deconf_str}>
                                                 <address>
                                                     <ip>{address}</ip>
                                                     <config>
@@ -447,16 +469,66 @@ class Device:
             self.manager.edit_config(config=config)
             self.manager.commit()
 
-            self.logger.debug(f'Configured address {address}/{prefix} on {interface} on {self.ip_address} ({self.hostname})')
+            self.logger.debug(f'Configured ({not deconf}) address {address}/{prefix} on {interface} on {self.ip_address} ({self.hostname})')
 
             return True
         except Exception as e:
-            self.logger.error(f'Failed to configure address {address}/{prefix} on {interface} on {self.ip_address} ({self.hostname}): {str(e)}')
+            self.logger.error(f'Failed to configure ({not deconf}) address {address}/{prefix} on {interface} on {self.ip_address} ({self.hostname}): {str(e)}.\n{config}')
 
             return False
     
+    def load_configured_addresses(self):
+        filter = f'''
+                    <filter xmlns="urn:ietf:params:xml:ns:netconf:base:1.0">
+                        <interfaces xmlns="http://openconfig.net/yang/interfaces">
+                            <interface>
+                                <name></name>
+                                <subinterfaces>
+                                    <subinterface>
+                                        <index>0</index>
+                                        <ipv4 xmlns="http://openconfig.net/yang/interfaces/ip">
+                                            <addresses>
+                                                <address>
+                                                    <ip></ip>
+                                                    <config>
+                                                        <ip></ip>
+                                                        <prefix-length></prefix-length>
+                                                    </config>
+                                                </address>
+                                            </addresses>
+                                        </ipv4>
+                                    </subinterface>
+                                </subinterfaces>
+                            </interface>
+                        </interfaces>
+                    </filter>
+                '''
+        
+        try:
+            interface_reply = ET.fromstring(self.manager.get(filter).data_xml)
+
+            for (i, interface) in enumerate(interface_reply.findall('.//{http://openconfig.net/yang/interfaces}interface')):
+                interface_name = interface.find('.//{http://openconfig.net/yang/interfaces}name').text
+                address = interface.find('.//{http://openconfig.net/yang/interfaces/ip}ip')
+
+                # Skip management interface
+                if i == 0:
+                    continue
+
+                if address is not None:
+                    address = address.text
+                    prefix = interface.find('.//{http://openconfig.net/yang/interfaces/ip}prefix-length').text
+
+                    self.configurations.append(f'address {interface_name} {address}/{prefix}')
+            
+            self.logger.debug(f'Loaded configured addresses on {self.ip_address} ({self.hostname})')
+
+        except Exception as e:
+            self.logger.error(f'Failed to load configured addresses on {self.ip_address} ({self.hostname}): {str(e)}')
+            return
+
     # Configure route on device
-    def configure_route(self, destination, prefix, interface, next_hop, next_hop_prefix):
+    def configure_route(self, destination, prefix, interface, next_hop, next_hop_prefix, deconf=False):
         config = f'''
                     <config xmlns="urn:ietf:params:xml:ns:netconf:base:1.0">
                     <network-instances xmlns="http://openconfig.net/yang/network-instance">
@@ -578,11 +650,13 @@ class Device:
 
             return False
     
-    def apply_acl_interface(self, interface):
+    def apply_acl_interface(self, interface, deconf=False):
+        deconf_str = ' operation="delete"' if deconf else ''
+
         config = f'''
                     <config xmlns="urn:ietf:params:xml:ns:netconf:base:1.0">
                         <acl xmlns="http://openconfig.net/yang/acl">
-                            <interfaces>
+                            <interfaces{deconf_str}>
                                 <interface>
                                     <id>{interface}</id>
                                     <config>
@@ -614,9 +688,9 @@ class Device:
             self.manager.edit_config(config=config)
             self.manager.commit()
 
-            self.logger.debug(f'Configured ACL on interface {interface} on {self.ip_address} ({self.hostname})')
+            self.logger.debug(f'Configured ACL ({not deconf}) on interface {interface} on {self.ip_address} ({self.hostname})')
         except Exception as e:
-            self.logger.error(f'Failed to configure ACL on interface  {interface} on {self.ip_address} ({self.hostname}): {str(e)}')    
+            self.logger.error(f'Failed to configure ACL ({not deconf}) on interface  {interface} on {self.ip_address} ({self.hostname}): {str(e)}')    
 
     # TODO: Move to a helper class
     # Get network address from host address and prefix
