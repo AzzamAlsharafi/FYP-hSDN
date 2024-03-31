@@ -209,6 +209,16 @@ class Device:
     
     # Enable LLDP on device
     def enable_lldp(self):
+        filter = '''
+                    <filter xmlns="urn:ietf:params:xml:ns:netconf:base:1.0">
+                        <lldp xmlns="http://openconfig.net/yang/lldp">
+                            <config>
+                                <enabled></enabled>
+                            </config>
+                        </lldp>
+                    </filter>
+                '''
+
         config='''
                     <config xmlns="urn:ietf:params:xml:ns:netconf:base:1.0">
                         <lldp xmlns="http://openconfig.net/yang/lldp">
@@ -219,8 +229,12 @@ class Device:
                     </config>
                 '''        
         try:
-            self.manager.edit_config(config=config)
-            self.manager.commit()
+            lldp_reply = ET.fromstring(self.manager.get(filter).data_xml)
+
+            if lldp_reply.find('.//{http://openconfig.net/yang/lldp}enabled').text != 'true':
+                self.manager.edit_config(config=config)
+                self.manager.commit()
+
             self.lldp = True
             self.logger.debug(f'Enabled LLDP on {self.ip_address} ({self.hostname})')
             self.get_neighbors()
