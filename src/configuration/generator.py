@@ -214,7 +214,8 @@ class ConfigurationGenerator(app_manager.RyuApp):
                     # Find exit interface and next hop address
                     (exit_interface, next_hop_add) = self.get_exit_interface_next_hop(device['name'], next_hop)
                     if exit_interface:
-                        
+                        next_hop_add = next_hop_add.split('/')[0]
+
                         # Add route configuration for every address policy of policy device
                         for (address, _) in self.addresses[policy_device]:
                             conf = f'route {address} {exit_interface} {next_hop_add}'
