@@ -52,8 +52,16 @@ class SdnTopologyDiscovery(app_manager.RyuApp):
         configurations = ev.configurations
 
         for label in configurations:
-            for config in configurations[label]:
-                self.configure(label, config)
+            if label != 'B2b':
+                continue
+
+            if label in self.configurations:
+                for conf in self.configurations[label]:
+                    if conf not in configurations[label]:
+                        self.configure(label, conf, deconf=True)
+
+            for conf in configurations[label]:
+                self.configure(label, conf)
     
     # Run device instruction from API
     @set_ev_cls(EventSdnDeviceAPI)
@@ -89,8 +97,8 @@ class SdnTopologyDiscovery(app_manager.RyuApp):
             self.send_event_to_observers(EventPolicyDeviceAPI(old_name, new_name))
 
     # Configure device
-    def configure(self, label, config):
-        if label in self.configurations and config in self.configurations[label]:
+    def configure(self, label, config, deconf=False):
+        if not deconf and (label in self.configurations and config in self.configurations[label]):
             return # Configuration already applied
         
         split = config.split(' ')
@@ -99,8 +107,11 @@ class SdnTopologyDiscovery(app_manager.RyuApp):
             interface = split[1]
             (address, prefix) = split[2].split('/')
 
-            if self.configure_address(label, interface, address, prefix):
-                self.append_dict_list(self.configurations, label, config) # Add successful configuration
+            if self.configure_address(label, interface, address, prefix, deconf=deconf):
+                if deconf:
+                    self.remove_dict_list(self.configurations, label, config)
+                else:
+                    self.append_dict_list(self.configurations, label, config)
 
         elif split[0] == 'route':
             (address, prefix) = split[1].split('/')
@@ -108,13 +119,16 @@ class SdnTopologyDiscovery(app_manager.RyuApp):
 
             interface = split[2]
 
-            if self.configure_route(label, destination, prefix, interface):
-                self.append_dict_list(self.configurations, label, config) # Add successful configuration
+            if self.configure_route(label, destination, prefix, interface, deconf=deconf):
+                if deconf:
+                    self.remove_dict_list(self.configurations, label, config)
+                else:
+                    self.append_dict_list(self.configurations, label, config)
         else:
             self.logger.error(f'Invalid configuration for device {label}: {config}')
 
     # Configure address on device
-    def configure_address(self, label, interface, address, prefix):
+    def configure_address(self, label, interface, address, prefix, deconf=False):
         # Install flow to send ARP requests for the configured address to the controller
         datapath = self.datapaths[label]
         ofp = datapath.ofproto
@@ -123,17 +137,22 @@ class SdnTopologyDiscovery(app_manager.RyuApp):
         actions = [ofp_parser.OFPActionOutput(ofp.OFPP_CONTROLLER)]
         match = ofp_parser.OFPMatch(eth_type=0x0806, in_port=int(interface), arp_tpa=address, arp_op=1)
         instructions = [ofp_parser.OFPInstructionActions(ofp.OFPIT_APPLY_ACTIONS, actions)]
-        datapath.send_msg(ofp_parser.OFPFlowMod(datapath=datapath, match=match, instructions=instructions))
+        
+        if deconf:
+            datapath.send_msg(ofp_parser.OFPFlowMod(datapath=datapath, match=match, instructions=instructions, 
+                                                    command=ofp.OFPFC_DELETE, out_port=ofp.OFPP_ANY, out_group=ofp.OFPG_ANY))
+        else:
+            datapath.send_msg(ofp_parser.OFPFlowMod(datapath=datapath, match=match, instructions=instructions))
         
         # Configure route to the configured address
         destination = self.get_network_address(address, prefix)
-        self.configure_route(label, destination, prefix, interface)
+        self.configure_route(label, destination, prefix, interface, deconf=deconf)
 
-        self.logger.debug(f'Configured address {address} on {interface} for {label}')
+        self.logger.debug(f'Configured ({not deconf}) address {address} on {interface} for {label}')
         return True
 
     # Configure route on device
-    def configure_route(self, label, destination, prefix, interface):
+    def configure_route(self, label, destination, prefix, interface, deconf=False):
         # Install flow to route packets to the configured destination to the configured interface
         datapath = self.datapaths[label]
         ofp = datapath.ofproto
@@ -144,9 +163,14 @@ class SdnTopologyDiscovery(app_manager.RyuApp):
             ofp_parser.OFPActionOutput(int(interface))]
         match = ofp_parser.OFPMatch(eth_type=0x0800, ipv4_dst=f'{destination}/{prefix}')
         instructions = [ofp_parser.OFPInstructionActions(ofp.OFPIT_APPLY_ACTIONS, actions)]
-        datapath.send_msg(ofp_parser.OFPFlowMod(datapath=datapath, match=match, instructions=instructions))
+        
+        if deconf:
+            datapath.send_msg(ofp_parser.OFPFlowMod(datapath=datapath, match=match, instructions=instructions, 
+                                                    command=ofp.OFPFC_DELETE, out_port=ofp.OFPP_ANY, out_group=ofp.OFPG_ANY))
+        else:
+            datapath.send_msg(ofp_parser.OFPFlowMod(datapath=datapath, match=match, instructions=instructions))
 
-        self.logger.debug(f'Configured route {destination}/{prefix} to {interface} for {label}')
+        self.logger.debug(f'Configured ({not deconf}) route {destination}/{prefix} to {interface} for {label}')
         return True
 
     # Load SDN devices labels from previous sessions
@@ -288,7 +312,7 @@ class SdnTopologyDiscovery(app_manager.RyuApp):
         
         self.logger.debug(f'OFPFlowRemoved received ({reason})')
 
-    # Listener for incoming packets (just LLDP for now)
+    # Listener for incoming packets
     @set_ev_cls(ofp_event.EventOFPPacketIn, MAIN_DISPATCHER)
     def packet_in_handler(self, ev):
         msg = ev.msg
@@ -369,6 +393,10 @@ class SdnTopologyDiscovery(app_manager.RyuApp):
             dict[key].append(item)
         else:
             dict[key] = [item]
+    
+    def remove_dict_list(self, dict, key, item):
+        if key in dict:
+            dict[key].remove(item)
 
     def get_network_address(self, address, prefix):
         address = address.split('.')
