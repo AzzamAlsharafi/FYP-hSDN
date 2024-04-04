@@ -150,6 +150,7 @@ class Device:
 
         self.configurations = [] # List of applied device configurations
         self.acl_statements = 0 # Number of ACL statements
+        self.seq_ids = {} # Map block configurations to sequence IDs
 
         self.logger = logging.getLogger(f'NetconfController-{self.ip_address}')
         self.logger.setLevel(logging.INFO)
@@ -207,8 +208,11 @@ class Device:
         elif split[0] == 'block':
             (src_ip, dst_ip, proto, src_port, dst_port) = split[1:]
 
-            # if self.configure_block(src_ip, dst_ip, proto, src_port, dst_port, deconf=deconf):
-            #     self.configurations.append(conf)
+            if self.configure_block(src_ip, dst_ip, proto, src_port, dst_port, deconf=deconf):
+                if deconf:
+                    self.configurations.remove(conf)
+                else:
+                    self.configurations.append(conf)
         
         else:
             self.logger.error(f'Invalid configuration for device {self.hostname}: {conf}')
@@ -235,6 +239,7 @@ class Device:
     def load_configurations(self):
         self.load_configured_addresses()
         self.load_configured_routes()
+        self.deconfigure_blocks()
 
     # Enable LLDP on device
     def enable_lldp(self):
@@ -645,15 +650,26 @@ class Device:
     
     # Configure block on device
     def configure_block(self, src_ip, dst_ip, proto, src_port, dst_port, deconf=False):
+        deconf_str = ' operation="delete"' if deconf else ''
+        key = f'{src_ip}_{dst_ip}_{proto}_{src_port}_{dst_port}'
+
         acl_name = f'ACL_{self.hostname}'
-        sequence_id = (self.acl_statements * 10) + 10
+        sequence_id = (self.acl_statements * 10) + 10 if not deconf else self.seq_ids[key]
 
         src_ip = src_ip if src_ip != '*' else '0.0.0.0/0'
         dst_ip = dst_ip if dst_ip != '*' else '0.0.0.0/0'
         src_port = src_port if src_port != '*' else 'ANY'
         dst_port = dst_port if dst_port != '*' else 'ANY'
+        proto = proto if proto != '*' else 'IP'
 
-        proto_line = f'<protocol>{proto}</protocol>' if proto != '*' else ''
+        transport_block = f'''
+                                            <transport>
+                                                <config>
+                                                    <source-port>{src_port}</source-port>
+                                                    <destination-port>{dst_port}</destination-port>
+                                                </config>
+                                            </transport>
+                                            ''' if proto == '6' or proto == '17' else ''
 
         config = f'''
                     <config xmlns="urn:ietf:params:xml:ns:netconf:base:1.0">
@@ -667,7 +683,7 @@ class Device:
                                         <type>ACL_IPV4</type>
                                     </config>
                                     <acl-entries>
-                                        <acl-entry>
+                                        <acl-entry{deconf_str}>
                                             <sequence-id>{sequence_id}</sequence-id>
                                             <config>
                                                 <sequence-id>{sequence_id}</sequence-id>
@@ -676,15 +692,9 @@ class Device:
                                                 <config>
                                                     <source-address>{src_ip}</source-address>
                                                     <destination-address>{dst_ip}</destination-address>
-                                                    {proto_line}
+                                                    <protocol>{proto}</protocol>
                                                 </config>
-                                            </ipv4>
-                                            <transport>
-                                                <config>
-                                                    <source-port>{src_port}</source-port>
-                                                    <destination-port>{dst_port}</destination-port>
-                                                </config>
-                                            </transport>
+                                            </ipv4>{transport_block}
                                             <actions>
                                                 <config>
                                                     <forwarding-action>DROP</forwarding-action>
@@ -702,15 +712,42 @@ class Device:
         try:
             self.manager.edit_config(config=config)
             self.manager.commit()
-            self.acl_statements += 1
+            self.acl_statements += (1 if not deconf else -1)
+            self.seq_ids[key] = sequence_id
 
-            self.logger.debug(f'Configured block {src_ip} {dst_ip} {proto} {src_port} {dst_port} on {self.ip_address} ({self.hostname})')
+            self.logger.debug(f'Configured ({not deconf}) block {src_ip} {dst_ip} {proto} {src_port} {dst_port} on {self.ip_address} ({self.hostname})')
 
             return True
         except Exception as e:
-            self.logger.error(f'Failed to configure block {src_ip} {dst_ip} {proto} {src_port} {dst_port} on {self.ip_address} ({self.hostname}): {str(e)}')
+            self.logger.error(f'Failed to configure ({not deconf}) block {src_ip} {dst_ip} {proto} {src_port} {dst_port} on {self.ip_address} ({self.hostname}): {str(e)}.\n{config}')
 
             return False
+
+    # Deconfigure already-configured block configurations
+    def deconfigure_blocks(self):
+        acl_name = f'ACL_{self.hostname}'
+
+        config = f'''
+                    <config xmlns="urn:ietf:params:xml:ns:netconf:base:1.0">
+                        <acl xmlns="http://openconfig.net/yang/acl">
+                            <acl-sets operation="delete">
+                                <acl-set>
+                                    <name>{acl_name}</name>
+                                    <type>ACL_IPV4</type>
+                                </acl-set>
+                            </acl-sets>
+                        </acl>
+                    </config>
+        '''
+
+        try:
+            self.manager.edit_config(config=config)
+            
+            self.logger.debug(f'Deconfigured blocks on {self.ip_address} ({self.hostname})')
+
+        except Exception as e:
+            self.logger.error(f'Failed to deconfigure blocks on {self.ip_address} ({self.hostname}): {str(e)}.\n{config}')
+            return
     
     def apply_acl_interface(self, interface, deconf=False):
         deconf_str = ' operation="delete"' if deconf else ''
@@ -752,7 +789,7 @@ class Device:
 
             self.logger.debug(f'Configured ACL ({not deconf}) on interface {interface} on {self.ip_address} ({self.hostname})')
         except Exception as e:
-            self.logger.error(f'Failed to configure ACL ({not deconf}) on interface  {interface} on {self.ip_address} ({self.hostname}): {str(e)}')    
+            self.logger.error(f'Failed to configure ACL ({not deconf}) on interface  {interface} on {self.ip_address} ({self.hostname}): {str(e)}.\n{config}')    
 
     # TODO: Move to a helper class
     # Get network address from host address and prefix
