@@ -124,6 +124,16 @@ class SdnTopologyDiscovery(app_manager.RyuApp):
                     self.remove_dict_list(self.configurations, label, config)
                 else:
                     self.append_dict_list(self.configurations, label, config)
+        
+        elif split[0] == 'block':
+            (src_ip, dst_ip, proto, src_port, dst_port) = split[1:]
+
+            if self.configure_block(label, src_ip, dst_ip, proto, src_port, dst_port, deconf=deconf):
+                if deconf:
+                    self.remove_dict_list(self.configurations, label, config)
+                else:
+                    self.append_dict_list(self.configurations, label, config)
+
         else:
             self.logger.error(f'Invalid configuration for device {label}: {config}')
 
@@ -140,7 +150,7 @@ class SdnTopologyDiscovery(app_manager.RyuApp):
         
         if deconf:
             datapath.send_msg(ofp_parser.OFPFlowMod(datapath=datapath, match=match, instructions=instructions, 
-                                                    command=ofp.OFPFC_DELETE, out_port=ofp.OFPP_ANY, out_group=ofp.OFPG_ANY))
+                                                    command=ofp.OFPFC_DELETE_STRICT, out_port=ofp.OFPP_ANY, out_group=ofp.OFPG_ANY))
         else:
             datapath.send_msg(ofp_parser.OFPFlowMod(datapath=datapath, match=match, instructions=instructions))
         
@@ -166,11 +176,61 @@ class SdnTopologyDiscovery(app_manager.RyuApp):
         
         if deconf:
             datapath.send_msg(ofp_parser.OFPFlowMod(datapath=datapath, match=match, instructions=instructions, 
-                                                    command=ofp.OFPFC_DELETE, out_port=ofp.OFPP_ANY, out_group=ofp.OFPG_ANY))
+                                                    command=ofp.OFPFC_DELETE_STRICT, out_port=ofp.OFPP_ANY, out_group=ofp.OFPG_ANY))
         else:
             datapath.send_msg(ofp_parser.OFPFlowMod(datapath=datapath, match=match, instructions=instructions))
 
         self.logger.debug(f'Configured ({not deconf}) route {destination}/{prefix} to {interface} for {label}')
+        return True
+    
+    # Configure block on device
+    def configure_block(self, label, src_ip, dst_ip, proto, src_port, dst_port, deconf=False):
+        datapath = self.datapaths[label]
+        ofp = datapath.ofproto
+        ofp_parser = datapath.ofproto_parser
+
+        src_ip = src_ip if src_ip != '*' else '0.0.0.0/0'
+        dst_ip = dst_ip if dst_ip != '*' else '0.0.0.0/0'
+
+        match = None
+        
+        if proto != '*':
+            if proto == '6':
+                if src_port == '*':
+                    if dst_port == '*':
+                        match = ofp_parser.OFPMatch(eth_type=0x0800, ipv4_src=src_ip, ipv4_dst=dst_ip, ip_proto=int(proto))
+                    else:
+                        match = ofp_parser.OFPMatch(eth_type=0x0800, ipv4_src=src_ip, ipv4_dst=dst_ip, ip_proto=int(proto), tcp_dst=int(dst_port))
+                else:
+                    if dst_port == '*':
+                        match = ofp_parser.OFPMatch(eth_type=0x0800, ipv4_src=src_ip, ipv4_dst=dst_ip, ip_proto=int(proto), tcp_src=int(src_port))
+                    else:
+                        match = ofp_parser.OFPMatch(eth_type=0x0800, ipv4_src=src_ip, ipv4_dst=dst_ip, ip_proto=int(proto), tcp_src=int(src_port), tcp_dst=int(dst_port))
+            elif proto == '17':
+                if src_port == '*':
+                    if dst_port == '*':
+                        match = ofp_parser.OFPMatch(eth_type=0x0800, ipv4_src=src_ip, ipv4_dst=dst_ip, ip_proto=int(proto))
+                    else:
+                        match = ofp_parser.OFPMatch(eth_type=0x0800, ipv4_src=src_ip, ipv4_dst=dst_ip, ip_proto=int(proto), udp_dst=int(dst_port))
+                else:
+                    if dst_port == '*':
+                        match = ofp_parser.OFPMatch(eth_type=0x0800, ipv4_src=src_ip, ipv4_dst=dst_ip, ip_proto=int(proto), udp_src=int(src_port))
+                    else:
+                        match = ofp_parser.OFPMatch(eth_type=0x0800, ipv4_src=src_ip, ipv4_dst=dst_ip, ip_proto=int(proto), udp_src=int(src_port), udp_dst=int(dst_port))
+            else:
+                match = ofp_parser.OFPMatch(eth_type=0x0800, ipv4_src=src_ip, ipv4_dst=dst_ip, ip_proto=int(proto))
+        else:
+            match = ofp_parser.OFPMatch(eth_type=0x0800, ipv4_src=src_ip, ipv4_dst=dst_ip)
+        
+        instructions = [ofp_parser.OFPInstructionActions(ofp.OFPIT_APPLY_ACTIONS, [])]
+
+        if deconf:
+            datapath.send_msg(ofp_parser.OFPFlowMod(datapath=datapath, match=match, instructions=instructions, 
+                                                    command=ofp.OFPFC_DELETE_STRICT, out_port=ofp.OFPP_ANY, out_group=ofp.OFPG_ANY))
+        else:
+            datapath.send_msg(ofp_parser.OFPFlowMod(datapath=datapath, match=match, instructions=instructions))
+        
+        self.logger.debug(f'Configured ({not deconf}) block ({src_ip}, {dst_ip}, {proto}, {src_port}, {dst_port}) for {label}')
         return True
 
     # Load SDN devices labels from previous sessions
