@@ -90,6 +90,7 @@ export type PolicyModal = {
   type: string,
   deviceName: string,
   device?: Device,
+  target: string,
   interface: number,
   address: string,
   flow: string,
@@ -106,6 +107,7 @@ export type PolicyModalUpdate = {
   editOriginal?: Policy,
   type?: string,
   deviceName?: string,
+  target?: string,
   interface?: number,
   address?: string,
   flow?: string,
@@ -138,6 +140,9 @@ export type AppState = {
   topology: Topology,
   config: Config,
   policies: Policy[],
+  subnets: Subnet[],
+  flows: string[],
+  zones: string[],
   selectedNodes: Node[],
   selectedEdges: Edge[],
   policyOpen: boolean,
@@ -151,6 +156,9 @@ const initialState: AppState = {
     topology: {devices: [], links: []},
     config: {classic: {}, sdn: {}},
     policies: [],
+    subnets: [],
+    flows: [],
+    zones: [],
     selectedNodes: [],
     selectedEdges: [],
     policyOpen: false,
@@ -159,6 +167,7 @@ const initialState: AppState = {
       type: '',
       deviceName: '',
       device: undefined,
+      target: '',
       interface: -1,
       address: '',
       flow: '',
@@ -191,6 +200,8 @@ export const appSlice = createSlice({
     },
     loadPolicies: (state, action: PayloadAction<Policy[]>) => {
       state.policies = action.payload
+
+      updatePolicies(state)
     },
     selectNodes: (state, action: PayloadAction<Node[]>) => {
       state.selectedNodes = action.payload
@@ -208,11 +219,10 @@ export const appSlice = createSlice({
         state.policyModal = {
           ...state.policyModal,
           type: original.type,
-          deviceName: original.type == 'flow' ? '' : 
-                      original.type == 'block' ? original.target : original.device,
-          device: original.type == 'flow' ?  undefined :
-                  original.type == 'block' ? state.topology.devices.find(d => d.name == original.target) : 
+          deviceName: original.type == 'flow' || original.type == 'block' ? '' : original.device,
+          device: original.type == 'flow'  || original.type == 'block' ?  undefined :
                   state.topology.devices.find(d => d.name == original.device),
+          target: original.type == 'block' ? original.target : '',
           interface: (original.type == 'address' ||
                       original.type == 'route' ||
                       original.type == 'disable') ? original.interface : -1,
@@ -265,11 +275,15 @@ export const appSlice = createSlice({
       
       state.policyModal = initialState.policyModal
       state.policyOpen = false
+
+      updatePolicies(state)
     },
     deletePolicy: (state, action: PayloadAction<Policy>) => {
       sendToApiQueue(`policy delete ${policyToWords(action.payload)}`)
       
       state.policies = state.policies.filter(p => JSON.stringify(p) !== JSON.stringify(action.payload))
+
+      updatePolicies(state)
     },
     openDevice: (state, action: PayloadAction<DeviceModalUpdate>) => {
       state.deviceOpen = true
@@ -320,6 +334,20 @@ export const appSlice = createSlice({
   }
 })
 
+function updatePolicies(state: AppState){
+  state.subnets = state.policies.filter(p => p.type == 'address').map(p => ({
+    device: p.type == 'address' ? p.device : '',
+    port: p.type == 'address' ? p.interface.toString() : '',
+    address: p.type == 'address' ? p.address : '',
+  }));
+
+  state.flows = state.policies.filter(p => p.type == 'flow').map(p => 
+    p.type == 'flow' ? p.name : '');
+
+  state.zones = state.policies.filter(p => p.type == 'zone').map(p =>
+    p.type == 'zone' ? p.zone : '').filter((value, index, self) => self.indexOf(value) === index);
+}
+
 export const { loadTopology, loadConfig, loadPolicies, selectNodes, selectEdges, openPolicy, 
   closePolicy, updateModal, discardPolicy, savePolicy, deletePolicy, openDevice, closeDevice, 
   updateDevice, discardDevice, saveDevice, deleteDevice } = appSlice.actions
@@ -327,6 +355,9 @@ export const { loadTopology, loadConfig, loadPolicies, selectNodes, selectEdges,
 export const topologySelector = (state: { app: AppState }) => state.app.topology;
 export const configSelector = (state: { app: AppState }) => state.app.config;
 export const policiesSelector = (state: { app: AppState }) => state.app.policies;
+export const subnetsSelector = (state: { app: AppState }) => state.app.subnets;
+export const flowsSelector = (state: { app: AppState }) => state.app.flows;
+export const zonesSelector = (state: { app: AppState }) => state.app.zones;
 export const nodesSelector = (state: { app: AppState }) => state.app.selectedNodes;
 export const edgesSelector = (state: { app: AppState }) => state.app.selectedEdges;
 export const policyOpenSelector = (state: { app: AppState }) => state.app.policyOpen;

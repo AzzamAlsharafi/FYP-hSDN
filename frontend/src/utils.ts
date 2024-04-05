@@ -88,7 +88,7 @@ export function makePolicy(modal: PolicyModal): Policy{
         case 'block':
             return {
                 type: 'block',
-                target: modal.deviceName,
+                target: modal.target,
                 flow: modal.flow
             }
         case 'route':

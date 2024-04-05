@@ -1,12 +1,15 @@
 import { Button, Divider, Modal, ModalBody, ModalCloseButton, ModalContent, ModalFooter, ModalHeader, ModalOverlay } from "@chakra-ui/react"
 import { useAppDispatch, useAppSelector } from "../redux/hooks";
-import { closePolicy, discardPolicy, policyModalSelector, policyOpenSelector, savePolicy, topologySelector, updateModal } from "../redux/appSlice";
+import { closePolicy, discardPolicy, flowsSelector, policyModalSelector, policyOpenSelector, savePolicy, topologySelector, updateModal, zonesSelector } from "../redux/appSlice";
 import { MSelect, MSelect2 } from "./mSelect";
 import MInput from "./mInput";
 import { PROTOCOLS } from "../utils";
 
 export default function PolicyModal(){
     const topology = useAppSelector(topologySelector);
+    const flows = useAppSelector(flowsSelector);
+    const zones = useAppSelector(zonesSelector);
+
     const open = useAppSelector(policyOpenSelector);
     const modal = useAppSelector(policyModalSelector);
     const dispatch = useAppDispatch();
@@ -29,10 +32,17 @@ export default function PolicyModal(){
                         : <></>
                     }
                     {
-                        modal.type && modal.type != 'flow' ? 
+                        modal.type && modal.type != 'flow' && modal.type != 'block' ? 
                         <MSelect label='Device' value={modal.deviceName} 
                         onChange={(e) => {dispatch(updateModal({deviceName: e.target.value}))}} 
                         options={topology.devices.map((d) => d.name)} />
+                        : <></>
+                    }
+                    {
+                        modal.type == 'block' ?
+                        <MSelect label="Target" value={modal.target} 
+                        onChange={(e) => dispatch(updateModal({target: e.target.value}))}
+                        options={topology.devices.map((d) => d.name).concat(zones)} />
                         : <></>
                     }
                     {
@@ -48,8 +58,14 @@ export default function PolicyModal(){
                         : <></>
                     }
                     {
-                        (modal.type == 'flow' || modal.type == 'block' || modal.type == 'route') ?
+                        (modal.type == 'flow') ?
                         <MInput label="Flow Name" placeholder="Type flow name" value={modal.flow}
+                        onChange={(e) => dispatch(updateModal({flow: e.target.value}))}/>
+                        : <></>
+                    }
+                    {
+                        (modal.type == 'block' || modal.type == 'route') ?
+                        <MSelect label="Flow" value={modal.flow} options={flows}
                         onChange={(e) => dispatch(updateModal({flow: e.target.value}))}/>
                         : <></>
                     }

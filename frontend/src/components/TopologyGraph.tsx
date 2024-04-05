@@ -1,5 +1,5 @@
 import ReactFlow, { Background, ConnectionMode, Controls, Edge, Node, SelectionMode, useEdgesState, useNodesState, useOnSelectionChange } from "reactflow";
-import { Device, Topology, Subnet, configSelector, topologySelector, selectNodes, selectEdges } from "../redux/appSlice";
+import { Device, Topology, Subnet, topologySelector, selectNodes, selectEdges, subnetsSelector } from "../redux/appSlice";
 import { useAppDispatch, useAppSelector } from "../redux/hooks";
 
 import 'reactflow/dist/style.css';
@@ -13,35 +13,46 @@ const nodeTypes = {'device': DeviceNode, 'subnet': SubnetNode};
 
 export default function TopologyGraph() {
     const topology = useAppSelector(topologySelector);
-    const config = useAppSelector(configSelector);
+    const rawSubnets = useAppSelector(subnetsSelector)
     const dispatch = useAppDispatch();
 
     const subnets = useMemo(
         () => {
             const subnets = [] as Subnet[];
-            
-            for (const [_, valueType] of Object.entries(config)) {
-                for (const [keyDevice, valueDevice] of Object.entries(valueType)) {
-                    valueDevice.forEach((configLine) => {
-                        const words = configLine.split(' ');
-                        if (words[0] == 'address') {
-                            if (topology.links.find((link) => 
-                            (link.device1 == keyDevice && link.port1 == words[1])
-                            || (link.device2 == keyDevice && link.port2 == words[1])) == undefined) {
-                                subnets.push({
-                                    device: keyDevice,
-                                    port: words[1],
-                                    address: getNetworkAddress(words[2])
-                                });
-                            }
-                        }
-                    })
+
+            for (const item of rawSubnets) {
+                const port = topology.devices.find((device) => device.name == item.device)?.ports[Number(item.port)];
+                if (port) {
+                    subnets.push({
+                        device: item.device,
+                        port: port.interface_name,
+                        address: getNetworkAddress(item.address)
+                    });
                 }
             }
-
+            
+            // for (const [_, valueType] of Object.entries(config)) {
+            //     for (const [keyDevice, valueDevice] of Object.entries(valueType)) {
+            //         valueDevice.forEach((configLine) => {
+            //             const words = configLine.split(' ');
+            //             if (words[0] == 'address') {
+            //                 if (topology.links.find((link) => 
+            //                 (link.device1 == keyDevice && link.port1 == words[1])
+            //                 || (link.device2 == keyDevice && link.port2 == words[1])) == undefined) {
+            //                     subnets.push({
+            //                         device: keyDevice,
+            //                         port: words[1],
+            //                         address: getNetworkAddress(words[2])
+            //                     });
+            //                 }
+            //             }
+            //         })
+            //     }
+            // }
+            
             return subnets;
         },
-        [config]
+        [rawSubnets, topology]
     )
 
     const [nodes, setNodes, onNodesChange] = useNodesState(createNodes(topology, subnets, null));
