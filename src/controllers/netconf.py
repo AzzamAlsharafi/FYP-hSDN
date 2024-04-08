@@ -248,10 +248,10 @@ class Device:
     
     # Load device configurations
     def load_configurations(self):
-        self.load_configured_addresses()
-        self.load_configured_routes()
+        self.deconfigure_routes()
         self.deconfigure_acls()
         self.deconfigre_route_map()
+        self.load_configured_addresses()
 
     # Enable LLDP on device
     def enable_lldp(self):
@@ -607,8 +607,8 @@ class Device:
 
             return False
     
-    # Load already-configured route configurations
-    def load_configured_routes(self):
+    # Deconfigure already-configured route configurations
+    def deconfigure_routes(self):
         filter = f'''
                     <filter xmlns="urn:ietf:params:xml:ns:netconf:base:1.0">
                         <network-instances xmlns="http://openconfig.net/yang/network-instance">
@@ -620,44 +620,44 @@ class Device:
                                             oc-pol-types:STATIC</identifier>
                                         <name>DEFAULT</name>
                                         <static-routes>
-                                            <static>
-                                                <prefix></prefix>
-                                                <next-hops>
-                                                    <next-hop>
-                                                        <config>
-                                                            <next-hop></next-hop>
-                                                        </config>
-                                                        <interface-ref>
-                                                            <config>
-                                                                <interface></interface>
-                                                            </config>
-                                                        </interface-ref>
-                                                    </next-hop>
-                                                </next-hops>
-                                            </static>
                                         </static-routes>
                                     </protocol>
                                 </protocols>
                             </network-instance>
                         </network-instances>
                     </filter>
+        '''
+
+        config = f'''
+                    <config xmlns="urn:ietf:params:xml:ns:netconf:base:1.0">
+                        <network-instances xmlns="http://openconfig.net/yang/network-instance">
+                            <network-instance>
+                                <name>default</name>
+                                <protocols>
+                                    <protocol>
+                                        <identifier xmlns:oc-pol-types="http://openconfig.net/yang/policy-types">
+                                            oc-pol-types:STATIC</identifier>
+                                        <name>DEFAULT</name>
+                                        <static-routes operation="delete">
+                                        </static-routes>
+                                    </protocol>
+                                </protocols>
+                            </network-instance>
+                        </network-instances>
+                    </config>
                 '''
         
         try:
             route_reply = ET.fromstring(self.manager.get(filter).data_xml)
 
-            for route in route_reply.findall('.//{http://openconfig.net/yang/network-instance}static'):
-                destination = route.find('.//{http://openconfig.net/yang/network-instance}prefix').text
-                next_hop = route.find('.//{http://openconfig.net/yang/network-instance}next-hop')
-                next_hop = next_hop.find('.//{http://openconfig.net/yang/network-instance}next-hop').text # Nested next-hop tag
-                interface = route.find('.//{http://openconfig.net/yang/network-instance}interface').text
-                
-                self.configurations.append(f'route {destination} {interface} {next_hop}')
+            if route_reply.find('.//{http://openconfig.net/yang/network-instance}static-route') is not None:
+                self.manager.edit_config(config=config)
+                self.manager.commit()
             
-            self.logger.debug(f'Loaded configured routes on {self.ip_address} ({self.hostname})')
+            self.logger.debug(f'Deconfigured routes on {self.ip_address} ({self.hostname})')
 
         except Exception as e:
-            self.logger.error(f'Failed to load configured routes on {self.ip_address} ({self.hostname}): {str(e)}')
+            self.logger.error(f'Failed to Deconfigured routes on {self.ip_address} ({self.hostname}): {str(e)}')
             return
     
     # Configure ACL statement on device
