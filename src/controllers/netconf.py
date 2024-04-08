@@ -151,6 +151,8 @@ class Device:
         self.configurations = [] # List of applied device configurations
         self.acl_statements = 0 # Number of ACL statements
         self.seq_ids = {} # Map block configurations to sequence IDs
+        self.route_map_statements = 0 # Number of route-map statements
+        self.route_map_ids = {} # Map route-map configurations to IDs
 
         self.logger = logging.getLogger(f'NetconfController-{self.ip_address}')
         self.logger.setLevel(logging.INFO)
@@ -214,6 +216,15 @@ class Device:
                 else:
                     self.configurations.append(conf)
         
+        elif split[0] == 'route-f':
+            (src_ip, dst_ip, proto, src_port, dst_port, port) = split[1:]
+
+            if self.configure_route_map(src_ip, dst_ip, proto, src_port, dst_port, port, deconf=deconf):
+                if deconf:
+                    self.configurations.remove(conf)
+                else:
+                    self.configurations.append(conf)
+        
         else:
             self.logger.error(f'Invalid configuration for device {self.hostname}: {conf}')
 
@@ -239,7 +250,8 @@ class Device:
     def load_configurations(self):
         self.load_configured_addresses()
         self.load_configured_routes()
-        self.deconfigure_blocks()
+        self.deconfigure_acls()
+        self.deconfigre_route_map()
 
     # Enable LLDP on device
     def enable_lldp(self):
@@ -648,13 +660,11 @@ class Device:
             self.logger.error(f'Failed to load configured routes on {self.ip_address} ({self.hostname}): {str(e)}')
             return
     
-    # Configure block on device
-    def configure_block(self, src_ip, dst_ip, proto, src_port, dst_port, deconf=False):
+    # Configure ACL statement on device
+    def configure_acl(self, acl_name, seq, rules, permit=False, deconf=False):
         deconf_str = ' operation="delete"' if deconf else ''
-        key = f'{src_ip}_{dst_ip}_{proto}_{src_port}_{dst_port}'
 
-        acl_name = f'ACL_{self.hostname}'
-        sequence_id = (self.acl_statements * 10) + 10 if not deconf else self.seq_ids[key]
+        (src_ip, dst_ip, proto, src_port, dst_port) = rules
 
         src_ip = src_ip if src_ip != '*' else '0.0.0.0/0'
         dst_ip = dst_ip if dst_ip != '*' else '0.0.0.0/0'
@@ -670,6 +680,8 @@ class Device:
                                                 </config>
                                             </transport>
                                             ''' if proto == '6' or proto == '17' else ''
+        
+        forwarding_action = 'ACCEPT' if permit else 'DROP'
 
         config = f'''
                     <config xmlns="urn:ietf:params:xml:ns:netconf:base:1.0">
@@ -684,9 +696,9 @@ class Device:
                                     </config>
                                     <acl-entries>
                                         <acl-entry{deconf_str}>
-                                            <sequence-id>{sequence_id}</sequence-id>
+                                            <sequence-id>{seq}</sequence-id>
                                             <config>
-                                                <sequence-id>{sequence_id}</sequence-id>
+                                                <sequence-id>{seq}</sequence-id>
                                             </config>
                                             <ipv4>
                                                 <config>
@@ -697,7 +709,7 @@ class Device:
                                             </ipv4>{transport_block}
                                             <actions>
                                                 <config>
-                                                    <forwarding-action>DROP</forwarding-action>
+                                                    <forwarding-action>{forwarding_action}</forwarding-action>
                                                     <log-action>LOG_NONE</log-action>
                                                 </config>
                                             </actions>
@@ -712,41 +724,74 @@ class Device:
         try:
             self.manager.edit_config(config=config)
             self.manager.commit()
-            self.acl_statements += (1 if not deconf else -1)
-            self.seq_ids[key] = sequence_id
-
-            self.logger.debug(f'Configured ({not deconf}) block {src_ip} {dst_ip} {proto} {src_port} {dst_port} on {self.ip_address} ({self.hostname})')
+            
+            self.logger.debug(f'Configured ({not deconf}) ACL {acl_name} statement {seq}: {src_ip} {dst_ip} {proto} {src_port} {dst_port} on {self.ip_address} ({self.hostname})')
 
             return True
         except Exception as e:
-            self.logger.error(f'Failed to configure ({not deconf}) block {src_ip} {dst_ip} {proto} {src_port} {dst_port} on {self.ip_address} ({self.hostname}): {str(e)}.\n{config}')
+            self.logger.error(f'Failed to configure ({not deconf}) ACL {acl_name} statement {seq}: {src_ip} {dst_ip} {proto} {src_port} {dst_port} on {self.ip_address} ({self.hostname}): {str(e)}.\n{config}')
 
             return False
 
-    # Deconfigure already-configured block configurations
-    def deconfigure_blocks(self):
-        acl_name = f'ACL_{self.hostname}'
+    # Configure block on device
+    def configure_block(self, src_ip, dst_ip, proto, src_port, dst_port, deconf=False):
+        key = f'{src_ip}_{dst_ip}_{proto}_{src_port}_{dst_port}'
 
-        config = f'''
-                    <config xmlns="urn:ietf:params:xml:ns:netconf:base:1.0">
+        acl_name = f'ACL_{self.hostname}'
+        sequence_id = (self.acl_statements * 10) + 10 if not deconf else self.seq_ids[key]
+
+        if self.configure_acl(acl_name, sequence_id, (src_ip, dst_ip, proto, src_port, dst_port), deconf=deconf):
+            self.acl_statements += (1 if not deconf else -1)
+            self.seq_ids[key] = sequence_id
+
+            self.logger.debug(f'Configured ({not deconf}) block on {self.ip_address} ({self.hostname})')
+
+            return True
+        else:
+            self.logger.error(f'Failed to configure ({not deconf}) block on {self.ip_address} ({self.hostname})')
+
+            return False
+
+    # Deconfigure already-configured ACLs
+    def deconfigure_acls(self):
+        filter = f'''
+                    <filter xmlns="urn:ietf:params:xml:ns:netconf:base:1.0">
                         <acl xmlns="http://openconfig.net/yang/acl">
-                            <acl-sets operation="delete">
+                            <acl-sets>
                                 <acl-set>
-                                    <name>{acl_name}</name>
+                                    <name></name>
                                     <type>ACL_IPV4</type>
                                 </acl-set>
                             </acl-sets>
                         </acl>
-                    </config>
+                    </filter>
         '''
 
         try:
-            self.manager.edit_config(config=config)
-            
-            self.logger.debug(f'Deconfigured blocks on {self.ip_address} ({self.hostname})')
+            acl_reply = ET.fromstring(self.manager.get(filter).data_xml)
+
+            for acl in acl_reply.findall('.//{http://openconfig.net/yang/acl}acl-set'):
+                acl_name = acl.find('.//{http://openconfig.net/yang/acl}name').text
+
+                config = f'''
+                            <config xmlns="urn:ietf:params:xml:ns:netconf:base:1.0">
+                                <acl xmlns="http://openconfig.net/yang/acl">
+                                    <acl-sets>
+                                        <acl-set operation="delete">
+                                            <name>{acl_name}</name>
+                                            <type>ACL_IPV4</type>
+                                        </acl-set>
+                                    </acl-sets>
+                                </acl>
+                            </config>
+                '''
+
+                self.manager.edit_config(config=config)
+                
+                self.logger.debug(f'Deconfigured ACL ({acl_name}) on {self.ip_address} ({self.hostname})')
 
         except Exception as e:
-            self.logger.error(f'Failed to deconfigure blocks on {self.ip_address} ({self.hostname}): {str(e)}.\n{config}')
+            self.logger.error(f'Failed to deconfigured ACL ({acl_name}) on {self.ip_address} ({self.hostname}): {str(e)}.\n{config}')
             return
     
     def apply_acl_interface(self, interface, deconf=False):
@@ -791,6 +836,115 @@ class Device:
         except Exception as e:
             self.logger.error(f'Failed to configure ACL ({not deconf}) on interface  {interface} on {self.ip_address} ({self.hostname}): {str(e)}.\n{config}')    
 
+    # Configure route-map on device
+    def configure_route_map(self, src_ip, dst_ip, proto, src_port, dst_port, port, deconf=False):
+        route_map_name = f'MAP_{self.hostname}'
+        
+        key = f'{src_ip}_{dst_ip}_{proto}_{src_port}_{dst_port}_{port}'
+        id = (self.route_map_statements * 10) + 10 if not deconf else self.route_map_ids[key]
+        acl_name = f'ACL_route-f_{self.hostname}_{id}'
+
+        if self.configure_acl(acl_name, 10, (src_ip, dst_ip, proto, src_port, dst_port), permit=True, deconf=deconf):
+            next_hop = self.get_next_hop_from_port(port)
+
+            if next_hop is not None:
+                config = f'''
+                        <config xmlns="urn:ietf:params:xml:ns:netconf:base:1.0">
+                            <native xmlns="http://cisco.com/ns/yang/Cisco-IOS-XE-native">
+                                <route-map>
+                                    <name>{route_map_name}</name>
+                                    <route-map-without-order-seq xmlns="http://cisco.com/ns/yang/Cisco-IOS-XE-route-map">
+                                        <seq_no>{id}</seq_no>
+                                        <operation>permit</operation>
+                                        <set>
+                                            <ip>
+                                                <next-hop>
+                                                    <address>{next_hop}</address>
+                                                </next-hop>
+                                            </ip>
+                                        </set>
+                                        <match>
+                                            <ip>
+                                                <address>
+                                                    <access-list>{acl_name}</access-list>
+                                                </address>
+                                            </ip>
+                                        </match>
+                                    </route-map-without-order-seq>
+                                </route-map>
+                            </native>
+                        </config>
+                        '''
+                
+                try:
+                    self.manager.edit_config(config=config)
+                    self.manager.commit()
+
+                    self.route_map_statements += (1 if not deconf else -1)
+                    self.route_map_ids[key] = id
+
+                    self.logger.debug(f'Configured ({not deconf}) route-map to port {port} on {self.ip_address} ({self.hostname})')
+
+                    return True
+                except Exception as e:
+                    self.logger.error(f'Failed to configure ({not deconf}) route-map to port {port} on {self.ip_address} ({self.hostname}): {str(e)}.\n{config}')
+
+                    return False
+            else:
+                self.logger.error(f'Failed to configure ({not deconf}) route-map to port {port} on {self.ip_address} ({self.hostname}): No next hop found')
+                return False
+        else:
+            self.logger.error(f'Failed to configure ({not deconf}) ACL for route-map to port {port} on {self.ip_address} ({self.hostname})')
+            return False
+        
+
+    # Deconfigure already-configured route-map configurations
+    def deconfigre_route_map(self):
+        filter = f'''
+                    <filter xmlns="urn:ietf:params:xml:ns:netconf:base:1.0">
+                            <native xmlns="http://cisco.com/ns/yang/Cisco-IOS-XE-native">
+                                <route-map>
+                                    <name></name>
+                                </route-map>
+                            </native>
+                    </filter>
+        '''
+
+        try:
+            route_map_reply = ET.fromstring(self.manager.get(filter).data_xml)
+
+            for route_map in route_map_reply.findall('.//{http://cisco.com/ns/yang/Cisco-IOS-XE-native}route-map'):
+                route_map_name = route_map.find('.//{http://cisco.com/ns/yang/Cisco-IOS-XE-native}name').text
+
+                config = f'''
+                            <config xmlns="urn:ietf:params:xml:ns:netconf:base:1.0">
+                                <native xmlns="http://cisco.com/ns/yang/Cisco-IOS-XE-native">
+                                    <route-map operation="delete">
+                                        <name>{route_map_name}</name>
+                                    </route-map>
+                                </native>
+                            </config>
+                '''
+
+                self.manager.edit_config(config=config)
+            
+            self.logger.debug(f'Deconfigured route-map on {self.ip_address} ({self.hostname})')
+
+        except Exception as e:
+            self.logger.error(f'Failed to deconfigure route-map on {self.ip_address} ({self.hostname}): {str(e)}.\n{config}')
+            return
+    
+    # TODO: temporary solution, assumes exit port network is /30, so there's only one possible next hop address
+    # Get next hop address from exit port
+    def get_next_hop_from_port(self, port):
+        for c in self.configurations:
+            split = c.split(' ')
+            if split[0] == 'address' and split[1] == port:
+                (address, prefix) = split[2].split('/')
+                other = self.get_other_address(address)
+                return other
+                
+
     # TODO: Move to a helper class
     # Get network address from host address and prefix
     def get_network_address(self, address, prefix):
@@ -807,3 +961,28 @@ class Device:
         network_address = [str(int(network_address[i:i+8], 2)) for i in range(0, 32, 8)]
 
         return '.'.join(network_address)
+    
+    # Returns other address of /30 network
+    def get_other_address(self, address):
+        address = address.split('.')
+        prefix = 30
+
+        # Convert address to binary
+        address = ''.join(format(int(octet), '08b') for octet in address)
+
+        # Get network address
+        network_address = address[:prefix] + '0' * (32 - prefix)
+
+        address = int(address, 2)
+        network_address = int(network_address, 2)
+
+        if address - 1 == network_address:
+            address = address + 1
+        else:
+            address = address - 1
+        
+        address = str(bin(address))[2:]
+
+        other_address = [str(int(address[i:i+8], 2)) for i in range(0, 32, 8)]
+
+        return '.'.join(other_address)
