@@ -52,9 +52,6 @@ class SdnTopologyDiscovery(app_manager.RyuApp):
         configurations = ev.configurations
 
         for label in configurations:
-            if label != 'B2b':
-                continue
-
             if label in self.configurations:
                 for conf in self.configurations[label]:
                     if conf not in configurations[label]:
@@ -133,6 +130,15 @@ class SdnTopologyDiscovery(app_manager.RyuApp):
                     self.remove_dict_list(self.configurations, label, config)
                 else:
                     self.append_dict_list(self.configurations, label, config)
+        
+        elif split[0] == 'route-f':
+            (src_ip, dst_ip, proto, src_port, dst_port, port) = split[1:]
+
+            if self.configure_route_f(label, src_ip, dst_ip, proto, src_port, dst_port, port, deconf=deconf):
+                if deconf:
+                    self.remove_dict_list(self.configurations, label, config)
+                else:
+                    self.append_dict_list(self.configurations, label, config)
 
         else:
             self.logger.error(f'Invalid configuration for device {label}: {config}')
@@ -189,6 +195,45 @@ class SdnTopologyDiscovery(app_manager.RyuApp):
         ofp = datapath.ofproto
         ofp_parser = datapath.ofproto_parser
 
+        match = self.flow_to_match(ofp_parser, (src_ip, dst_ip, proto, src_port, dst_port))
+        
+        instructions = [ofp_parser.OFPInstructionActions(ofp.OFPIT_APPLY_ACTIONS, [])]
+
+        if deconf:
+            datapath.send_msg(ofp_parser.OFPFlowMod(datapath=datapath, match=match, instructions=instructions, 
+                                                    command=ofp.OFPFC_DELETE_STRICT, out_port=ofp.OFPP_ANY, out_group=ofp.OFPG_ANY))
+        else:
+            datapath.send_msg(ofp_parser.OFPFlowMod(datapath=datapath, match=match, instructions=instructions))
+        
+        self.logger.debug(f'Configured ({not deconf}) block ({src_ip}, {dst_ip}, {proto}, {src_port}, {dst_port}) for {label}')
+        return True
+    
+    # Configure route-f on device
+    def configure_route_f(self, label, src_ip, dst_ip, proto, src_port, dst_port, port, deconf=False):
+        datapath = self.datapaths[label]
+        ofp = datapath.ofproto
+        ofp_parser = datapath.ofproto_parser
+
+        match = self.flow_to_match(ofp_parser, (src_ip, dst_ip, proto, src_port, dst_port))
+        
+        actions = [
+            ofp_parser.OFPActionSetField(eth_dst='ff:ff:ff:ff:ff:ff'), # Broadcast MAC address to not deal with ARP
+            ofp_parser.OFPActionOutput(int(port))]
+        instructions = [ofp_parser.OFPInstructionActions(ofp.OFPIT_APPLY_ACTIONS, actions)]
+
+        if deconf:
+            datapath.send_msg(ofp_parser.OFPFlowMod(datapath=datapath, match=match, instructions=instructions, 
+                                                    command=ofp.OFPFC_DELETE_STRICT, out_port=ofp.OFPP_ANY, out_group=ofp.OFPG_ANY))
+        else:
+            datapath.send_msg(ofp_parser.OFPFlowMod(datapath=datapath, match=match, instructions=instructions))
+        
+        self.logger.debug(f'Configured ({not deconf}) route-f ({src_ip}, {dst_ip}, {proto}, {src_port}, {dst_port}) to {port} for {label}')
+        return True
+
+    # Convert 5 tuple (flow) to match
+    def flow_to_match(self, ofp_parser, flow):
+        (src_ip, dst_ip, proto, src_port, dst_port) = flow
+
         src_ip = src_ip if src_ip != '*' else '0.0.0.0/0'
         dst_ip = dst_ip if dst_ip != '*' else '0.0.0.0/0'
 
@@ -222,16 +267,7 @@ class SdnTopologyDiscovery(app_manager.RyuApp):
         else:
             match = ofp_parser.OFPMatch(eth_type=0x0800, ipv4_src=src_ip, ipv4_dst=dst_ip)
         
-        instructions = [ofp_parser.OFPInstructionActions(ofp.OFPIT_APPLY_ACTIONS, [])]
-
-        if deconf:
-            datapath.send_msg(ofp_parser.OFPFlowMod(datapath=datapath, match=match, instructions=instructions, 
-                                                    command=ofp.OFPFC_DELETE_STRICT, out_port=ofp.OFPP_ANY, out_group=ofp.OFPG_ANY))
-        else:
-            datapath.send_msg(ofp_parser.OFPFlowMod(datapath=datapath, match=match, instructions=instructions))
-        
-        self.logger.debug(f'Configured ({not deconf}) block ({src_ip}, {dst_ip}, {proto}, {src_port}, {dst_port}) for {label}')
-        return True
+        return match
 
     # Load SDN devices labels from previous sessions
     def load_all_labels(self):
