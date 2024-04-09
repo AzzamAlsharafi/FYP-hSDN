@@ -153,6 +153,7 @@ class Device:
         self.seq_ids = {} # Map block configurations to sequence IDs
         self.route_map_statements = 0 # Number of route-map statements
         self.route_map_ids = {} # Map route-map configurations to IDs
+        self.disabled = [] # List of disabled interfaces
 
         self.logger = logging.getLogger(f'NetconfController-{self.ip_address}')
         self.logger.setLevel(logging.INFO)
@@ -225,6 +226,15 @@ class Device:
                 else:
                     self.configurations.append(conf)
         
+        elif split[0] == 'disable':
+            port = split[1]
+
+            if self.configure_disable(port, deconf=deconf):
+                if deconf:
+                    self.configurations.remove(conf)
+                else:
+                    self.configurations.append(conf)
+
         else:
             self.logger.error(f'Invalid configuration for device {self.hostname}: {conf}')
 
@@ -376,7 +386,10 @@ class Device:
                 # Add interface to interfaces
                 self.interfaces.append({'interface_name': interface_name, 'hw_addr': mac_address})
 
-                # Check if interface is disabled or LLDP is disabled
+                # Check if interface is disabled or LLDP is disabled (Make sure interface is not disabled by policy first)
+                if interface_name in self.disabled:
+                    continue
+
                 if not (non_lldp_interface.find('.//{http://openconfig.net/yang/interfaces}enabled').text == 'true'
                     and interface.find('.//{http://openconfig.net/yang/lldp}enabled').text == 'true'):
                     disabled_interfaces.append(interface_name)
@@ -934,6 +947,55 @@ class Device:
             self.logger.error(f'Failed to deconfigure route-map on {self.ip_address} ({self.hostname}): {str(e)}.\n{config}')
             return
     
+    # Configure disable on device
+    def configure_disable(self, port, deconf=False):
+        filter = f'''
+                        <filter xmlns="urn:ietf:params:xml:ns:netconf:base:1.0">
+                            <interfaces xmlns="http://openconfig.net/yang/interfaces">
+                                <interface>
+                                    <name>{port}</name>
+                                    <state>
+                                        <enabled></enabled>
+                                    </state>
+                                </interface>
+                            </interfaces>
+                        </filter>
+                        '''
+        
+        try:
+            interface_reply = ET.fromstring(self.manager.get(filter).data_xml)
+
+            if interface_reply.find('.//{http://openconfig.net/yang/interfaces}enabled').text == 'true' and not deconf:
+                config = f'''
+                            <config xmlns="urn:ietf:params:xml:ns:netconf:base:1.0">
+                                <interfaces xmlns="http://openconfig.net/yang/interfaces">
+                                    <interface>
+                                        <name>{port}</name>
+                                        <config>
+                                            <name>{port}</name>
+                                            <enabled>false</enabled>
+                                        </config>
+                                    </interface>
+                                </interfaces>
+                            </config>
+                        '''
+                
+                self.manager.edit_config(config=config)
+                self.manager.commit()
+            
+            if not port in self.disabled and not deconf:
+                self.disabled.append(port)
+            elif port in self.disabled and deconf:
+                self.disabled.remove(port)
+
+            self.logger.debug(f'Configured ({not deconf}) disable interface {port} on {self.ip_address} ({self.hostname})')
+
+            return True
+
+        except Exception as e:
+            self.logger.error(f'Failed to configure ({not deconf}) disable interface {port} on {self.ip_address} ({self.hostname}): {str(e)}')
+            return False
+
     # TODO: temporary solution, assumes exit port network is /30, so there's only one possible next hop address
     # Get next hop address from exit port
     def get_next_hop_from_port(self, port):
