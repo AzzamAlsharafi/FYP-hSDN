@@ -139,6 +139,15 @@ class SdnTopologyDiscovery(app_manager.RyuApp):
                     self.remove_dict_list(self.configurations, label, config)
                 else:
                     self.append_dict_list(self.configurations, label, config)
+        
+        elif split[0] == 'disable':
+            port = split[1]
+
+            if self.configure_disable(label, port, deconf=deconf):
+                if deconf:
+                    self.remove_dict_list(self.configurations, label, config)
+                else:
+                    self.append_dict_list(self.configurations, label, config)
 
         else:
             self.logger.error(f'Invalid configuration for device {label}: {config}')
@@ -228,6 +237,41 @@ class SdnTopologyDiscovery(app_manager.RyuApp):
             datapath.send_msg(ofp_parser.OFPFlowMod(datapath=datapath, match=match, instructions=instructions))
         
         self.logger.debug(f'Configured ({not deconf}) route-f ({src_ip}, {dst_ip}, {proto}, {src_port}, {dst_port}) to {port} for {label}')
+        return True
+    
+    # Configure disable on device
+    def configure_disable(self, label, port, deconf=False):
+        datapath = self.datapaths[label]
+        ofp = datapath.ofproto
+        ofp_parser = datapath.ofproto_parser
+
+        # Send PortMod to disable the port
+        hw_addr = next((p['hw_addr'] for p in self.ports[label] if p['port_no'] == int(port)), None)
+
+        if hw_addr is None:
+            self.logger.error(f'Port {port} not found on {label}')
+            return False
+        
+        mask = (ofp.OFPPC_PORT_DOWN | ofp.OFPPC_NO_RECV | ofp.OFPPC_NO_FWD | ofp.OFPPC_NO_PACKET_IN)
+        config = 0 if deconf else mask
+
+        port_mod = ofp_parser.OFPPortMod(datapath=datapath, port_no=int(port), hw_addr=hw_addr, config=config, mask=mask)
+
+        datapath.send_msg(port_mod)
+
+        if not deconf:
+            # Clear neighbor entries of the disabled port
+            neighbors = []
+
+            if label in self.lldp:
+                for (neighbor, data) in self.lldp[label].items():
+                    if data['port'] == int(port):
+                        neighbors.append(neighbor)
+            
+            for neighbor in neighbors:
+                self.lldp[label].pop(neighbor)
+
+        self.logger.debug(f'Configured ({not deconf}) disable {port} ({hw_addr}) for {label}')
         return True
 
     # Convert 5 tuple (flow) to match
