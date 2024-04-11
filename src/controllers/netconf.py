@@ -154,6 +154,7 @@ class Device:
         self.route_map_statements = 0 # Number of route-map statements
         self.route_map_ids = {} # Map route-map configurations to IDs
         self.disabled = [] # List of disabled interfaces
+        self.last_id = 0 # Last used ID for route-map or ACL
 
         self.logger = logging.getLogger(f'NetconfController-{self.ip_address}')
         self.logger.setLevel(logging.INFO)
@@ -382,6 +383,12 @@ class Device:
                 else:
                     if acl_reply.find('.//{http://openconfig.net/yang/acl}interface[{http://openconfig.net/yang/acl}id="' + interface_name + '"]') is not None:
                         self.apply_acl_interface(interface_name, deconf=True)
+
+                # Make sure route-map is applied/not applied to interface when there is (no) route-map statements
+                if self.route_map_statements > 0:
+                    self.apply_route_map_interface(interface_name)
+                else:
+                    self.apply_route_map_interface(interface_name, deconf=True)
 
                 # Add interface to interfaces
                 self.interfaces.append({'interface_name': interface_name, 'hw_addr': mac_address})
@@ -751,9 +758,14 @@ class Device:
         key = f'{src_ip}_{dst_ip}_{proto}_{src_port}_{dst_port}'
 
         acl_name = f'ACL_{self.hostname}'
-        sequence_id = (self.acl_statements * 10) + 10 if not deconf else self.seq_ids[key]
+        sequence_id = self.get_next_id() if not deconf else self.seq_ids[key]
 
         if self.configure_acl(acl_name, sequence_id, (src_ip, dst_ip, proto, src_port, dst_port), deconf=deconf):
+            if (self.acl_statements == 0 and not deconf) or (self.acl_statements == 1 and deconf): 
+                if not self.configure_acl(acl_name, 999, ('*', '*', '*', '*', '*'), permit=True, deconf=deconf):
+                    self.logger.error(f'Failed to configure ({not deconf}) block (999) on {self.ip_address} ({self.hostname})')
+                    return False
+
             self.acl_statements += (1 if not deconf else -1)
             self.seq_ids[key] = sequence_id
 
@@ -851,10 +863,11 @@ class Device:
 
     # Configure route-map on device
     def configure_route_map(self, src_ip, dst_ip, proto, src_port, dst_port, port, deconf=False):
+        deconf_str = ' operation="delete"' if deconf else ''
         route_map_name = f'MAP_{self.hostname}'
         
         key = f'{src_ip}_{dst_ip}_{proto}_{src_port}_{dst_port}_{port}'
-        id = (self.route_map_statements * 10) + 10 if not deconf else self.route_map_ids[key]
+        id = self.get_next_id() if not deconf else self.route_map_ids[key]
         acl_name = f'ACL_route-f_{self.hostname}_{id}'
 
         if self.configure_acl(acl_name, 10, (src_ip, dst_ip, proto, src_port, dst_port), permit=True, deconf=deconf):
@@ -866,7 +879,7 @@ class Device:
                             <native xmlns="http://cisco.com/ns/yang/Cisco-IOS-XE-native">
                                 <route-map>
                                     <name>{route_map_name}</name>
-                                    <route-map-without-order-seq xmlns="http://cisco.com/ns/yang/Cisco-IOS-XE-route-map">
+                                    <route-map-without-order-seq xmlns="http://cisco.com/ns/yang/Cisco-IOS-XE-route-map"{deconf_str}>
                                         <seq_no>{id}</seq_no>
                                         <operation>permit</operation>
                                         <set>
@@ -910,6 +923,43 @@ class Device:
             self.logger.error(f'Failed to configure ({not deconf}) ACL for route-map to port {port} on {self.ip_address} ({self.hostname})')
             return False
         
+    def apply_route_map_interface(self, interface, deconf=False):
+        deconf_str = ' operation="delete"' if deconf else ''
+        route_map_name = f'MAP_{self.hostname}'
+
+        interface = interface.replace('GigabitEthernet', '')
+
+        config = f'''
+                    <config xmlns="urn:ietf:params:xml:ns:netconf:base:1.0">
+                        <native xmlns="http://cisco.com/ns/yang/Cisco-IOS-XE-native">
+                            <interface>
+                                <GigabitEthernet>
+                                    <name>{interface}</name>
+                                    <ip>
+                                        <policy{deconf_str}>
+                                            <route-map>{route_map_name}</route-map>
+                                        </policy>
+                                    </ip>
+                                </GigabitEthernet>
+                            </interface>
+                            <ip>
+                                <local>
+                                    <policy{deconf_str}>
+                                        <route-map>{route_map_name}</route-map>
+                                    </policy>
+                                </local>
+                            </ip>
+                        </native>
+                    </config>
+        '''
+
+        try:
+            self.manager.edit_config(config=config)
+            self.manager.commit()
+
+            self.logger.debug(f'Configured ({not deconf}) route-map on interface {interface} on {self.ip_address} ({self.hostname})')
+        except Exception as e:
+            self.logger.error(f'Failed to configure ({not deconf}) route-map on interface  {interface} on {self.ip_address} ({self.hostname}): {str(e)}.\n{config}')    
 
     # Deconfigure already-configured route-map configurations
     def deconfigre_route_map(self):
@@ -995,6 +1045,11 @@ class Device:
         except Exception as e:
             self.logger.error(f'Failed to configure ({not deconf}) disable interface {port} on {self.ip_address} ({self.hostname}): {str(e)}')
             return False
+    
+    # Get next available ID for route-map or ACL
+    def get_next_id(self):
+        self.last_id += 1
+        return self.last_id
 
     # TODO: temporary solution, assumes exit port network is /30, so there's only one possible next hop address
     # Get next hop address from exit port
