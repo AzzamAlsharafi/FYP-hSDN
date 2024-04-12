@@ -1,4 +1,4 @@
-import { FlowPolicy, Policy, PolicyModal } from "./redux/appSlice";
+import { Device, DeviceModal, FlowPolicy, Policy, PolicyModal } from "./redux/appSlice";
 
 export function getNetworkAddress(fullAddress: string){
     const [address, prefixString] = fullAddress.split('/')
@@ -163,5 +163,85 @@ export function policyToWords(policy: Policy){
             return `${policy.type} ${policy.device} ${policy.zone}`
         default:
             return `${policy.type} ${policy.device} ${policy.interface}`
+    }
+}
+
+function checkAddress(address: string, hasPrefix: boolean = false): boolean{
+    const [ip, prefix] = hasPrefix ? address.split('/') : [address, undefined];
+    
+    const re = /^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$/;
+
+    if (hasPrefix) {
+        return (re.test(ip) && Number(prefix) >= 0 && Number(prefix) <= 32 && prefix != '');
+    } else {
+        return re.test(ip);
+    }
+}
+
+function checkPort(port: string): boolean{
+    return (Number(port) >= 0 && Number(port) <= 65535) && port != '';
+}
+
+export function checkPolicyModal(modal: PolicyModal, flows: string[]){
+    const isTypeInvalid = !Boolean(modal.type);
+    const isDeviceInvalid = !Boolean(modal.deviceName);
+    const isTargetInvalid = !Boolean(modal.target);
+    const isPortInvalid = !Boolean(modal.interface) || modal.interface == -1;
+    const isAddressInvalid = !checkAddress(modal.address, true);
+    const isFlowNameInvalid = !Boolean(modal.flow) || (flows.includes(modal.flow) && modal.mode == 'create');
+    const isFlowInvalid = !(Boolean(modal.flow) && flows.includes(modal.flow));
+    const isZoneInvalid = !Boolean(modal.zone);
+    const isSrcIPInvalid = !(checkAddress(modal.src_ip, true) || modal.src_ip == '*');
+    const isDstIPInvalid = !(checkAddress(modal.dst_ip, true) || modal.dst_ip == '*');
+    const isProtocolInvalid = !Boolean(modal.protocol);
+    const isSrcPortInvalid = !(checkPort(modal.src_port) || modal.src_port == '*');
+    const isDstPortInvalid = !(checkPort(modal.dst_port) || modal.dst_port == '*');
+
+    var global = false;
+
+    if (modal.type == 'address'){
+        global = !isTypeInvalid && !isDeviceInvalid && !isPortInvalid && !isAddressInvalid;
+    } else if (modal.type == 'flow'){
+        global = !isTypeInvalid && !isFlowNameInvalid && !isSrcIPInvalid && !isDstIPInvalid && !isProtocolInvalid && !isSrcPortInvalid && !isDstPortInvalid;
+    } else if (modal.type == 'block'){
+        global = !isTypeInvalid && !isFlowInvalid && !isTargetInvalid;
+    } else if (modal.type == 'route'){
+        var global = !isTypeInvalid && !isDeviceInvalid && !isFlowInvalid && !isPortInvalid;
+    } else if (modal.type == 'zone'){
+        var global = !isTypeInvalid && !isDeviceInvalid && !isZoneInvalid;
+    } else if (modal.type == 'disable'){
+        var global = !isTypeInvalid && !isDeviceInvalid && !isPortInvalid;
+    }
+
+    return {
+        type: isTypeInvalid,
+        device: isDeviceInvalid,
+        target: isTargetInvalid,
+        port: isPortInvalid,
+        address: isAddressInvalid,
+        flowName: isFlowNameInvalid,
+        flow: isFlowInvalid,
+        zone: isZoneInvalid,
+        srcIP: isSrcIPInvalid,
+        dstIP: isDstIPInvalid,
+        protocol: isProtocolInvalid,
+        srcPort: isSrcPortInvalid,
+        dstPort: isDstPortInvalid,
+        global: !global
+    }
+}
+
+export function checkDeviceModal(modal: DeviceModal, devices: Device[]){
+    const isTypeInvalid = !(modal.type == 'Classic' || modal.type == 'SDN');
+    const isNameInvalid = !Boolean(modal.name) || devices.map(d => d.name).includes(modal.name);
+    const isIPInvalid = !checkAddress(modal.ip_address);
+
+    const global = (!isTypeInvalid && !isNameInvalid && !isIPInvalid) || (modal.mode == 'edit' && !isTypeInvalid && !isNameInvalid); 
+    
+    return {
+        type: isTypeInvalid,
+        name: isNameInvalid,
+        ip: isIPInvalid,
+        global: !global
     }
 }
