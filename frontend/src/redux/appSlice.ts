@@ -330,6 +330,23 @@ export const appSlice = createSlice({
     deleteDevice: (_, action: PayloadAction<Device>) => {
       sendToApiQueue(`device ${action.payload.type} delete ${action.payload.name}`)
       // TODO: delete device from frontend or wait for backend to update
+    },
+    addZone: (state, action: PayloadAction<string>) => {
+      const selectedDevices = state.selectedNodes.filter(node => node.type == 'device');
+
+      const newPolicies = selectedDevices.map(d => {
+        return {
+          type: 'zone',
+          device: d.data.name,
+          zone: action.payload,
+        } as ZonePolicy
+      })
+
+      newPolicies.forEach(p => sendToApiQueue(`policy new ${policyToWords(p)}`))
+
+      state.policies = [...state.policies, ...newPolicies]
+      
+      updatePolicies(state)
     }
   }
 })
@@ -350,7 +367,7 @@ function updatePolicies(state: AppState){
 
 export const { loadTopology, loadConfig, loadPolicies, selectNodes, selectEdges, openPolicy, 
   closePolicy, updateModal, discardPolicy, savePolicy, deletePolicy, openDevice, closeDevice, 
-  updateDevice, discardDevice, saveDevice, deleteDevice } = appSlice.actions
+  updateDevice, discardDevice, saveDevice, deleteDevice, addZone } = appSlice.actions
 
 export const topologySelector = (state: { app: AppState }) => state.app.topology;
 export const configSelector = (state: { app: AppState }) => state.app.config;

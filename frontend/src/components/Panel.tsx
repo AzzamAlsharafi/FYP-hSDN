@@ -1,4 +1,4 @@
-import { Box, Button, Divider, Flex, Text } from "@chakra-ui/react";
+import { Box, Button, Divider, Flex } from "@chakra-ui/react";
 import { useAppDispatch, useAppSelector } from "../redux/hooks";
 import { nodesSelector, openDevice, openPolicy } from "../redux/appSlice";
 import SummaryPanel from "./SummaryPanel";
@@ -6,6 +6,7 @@ import NodePanel from "./NodePanel";
 import PolicyModal from "./PolicyModal";
 import PoliciesList from "./PoliciesList";
 import DeviceModal from "./DeviceModal";
+import MultiActionPanel from "./MultiActionPanel";
 
 export default function Panel() {
     const selectedNodes = useAppSelector(nodesSelector);
@@ -16,7 +17,7 @@ export default function Panel() {
             <Box bg='white' borderRadius='20px' padding='20px'>
                 {selectedNodes.length == 0 ? <SummaryPanel /> 
                 : selectedNodes.length == 1 ? <NodePanel node={selectedNodes[0]} /> 
-                : <Text>MANY</Text>}
+                : <MultiActionPanel/>}
 
                 
                 <Divider/>
@@ -44,7 +45,7 @@ export default function Panel() {
                 <Divider/>
 
                 <Flex paddingTop='20px'>
-                    <Button flex='1' marginLeft='5px'
+                    <Button flex='1' marginRight='5px'
                     onClick={() => {dispatch(openPolicy({mode: 'create'}))}} >New Policy</Button>
                     <Button flex='1' marginLeft='5px'
                     onClick={() => {dispatch(openDevice({mode: 'create'}))}} >New Device</Button>
