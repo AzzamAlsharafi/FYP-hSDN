@@ -193,12 +193,18 @@ export const appSlice = createSlice({
   initialState,
   reducers: {
     loadTopology: (state, action: PayloadAction<Topology>) => {
+      if (JSON.stringify(state.topology) === JSON.stringify(action.payload)) return
+      
       state.topology = action.payload
     },
     loadConfig: (state, action: PayloadAction<Config>) => {
+      if (JSON.stringify(state.config) === JSON.stringify(action.payload)) return
+
       state.config = action.payload
     },
     loadPolicies: (state, action: PayloadAction<Policy[]>) => {
+      if (JSON.stringify(state.policies) === JSON.stringify(action.payload)) return
+
       state.policies = action.payload
 
       updatePolicies(state)
