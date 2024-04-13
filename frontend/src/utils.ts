@@ -1,4 +1,4 @@
-import { Device, DeviceModal, FlowPolicy, Policy, PolicyModal } from "./redux/appSlice";
+import { Device, DeviceModal, FlowPolicy, Link, Policy, PolicyModal, Topology } from "./redux/appSlice";
 
 export function getNetworkAddress(fullAddress: string){
     const [address, prefixString] = fullAddress.split('/')
@@ -244,4 +244,135 @@ export function checkDeviceModal(modal: DeviceModal, devices: Device[]){
         ip: isIPInvalid,
         global: !global
     }
+}
+
+export function calculateRoutes(topology: Topology, selectedDevices: string[]){
+    let routesCollections = [];
+    let lastDevice = selectedDevices[selectedDevices.length - 1];
+    
+    for (let i = 0; i < selectedDevices.length - 1; i++){
+        const d1 = selectedDevices[i];
+        const d2 = selectedDevices[i + 1];
+
+        routesCollections.push(getRoutes(topology, d1, d2));
+    }
+
+    const routes = cartesianProduct(routesCollections.map(c => c.map(r => r.route.slice(0, -1).toString())))
+    .map(r => r.join('-').split(',').join('-') + '-' + lastDevice);
+
+    // Filter out routes that includes the same device twice
+    const filtered = routes.filter(r => !r.split('-').some((d, i, a) => a.indexOf(d) != i));
+    
+    return filtered.slice(0, 3);
+}
+
+function cartesianProduct(collections: any[][]): string[][]{
+    return collections.reduce((acc,val) => {
+        return acc.map(el => {
+           return val.map(element => {
+              return el.concat([element]);
+           });
+        }).reduce((acc,val) => acc.concat(val) ,[]);
+     }, [[]]);
+}
+
+function getRoutes(topology: Topology, d1: string, d2: string){
+    let routes = [];
+
+    const bestRoute = getRoute(topology, d1, d2);
+    routes.push(bestRoute);
+
+    bestRoute.edges.forEach(e => {
+        const newTopology = {
+            devices: topology.devices,
+            links: topology.links.filter(l => l != e)
+        }
+
+        const route = getRoute(newTopology, d1, d2);
+
+        if (routes.every(r => r.route.toString() != route.route.toString())){
+            routes.push(route);
+        }
+    })
+    
+    routes.sort((a, b) => a.distance - b.distance);
+
+    return routes.slice(0, 3);
+}
+
+function getRoute(topology: Topology, d1: string, d2: string): {route: string[], edges: Link[], distance: number}{
+    const table = dijkstra(topology, d1);
+
+    let current = d2;
+    let route = [];
+
+    while (current != d1){
+        route.push(current);
+        current = table[current].previous!;
+    }
+    
+    route.push(d1);
+
+    route.reverse();
+
+    let edges = [];
+
+    for (let i = 0; i < route.length - 1; i++){
+        const device1 = route[i];
+        const device2 = route[i + 1];
+
+        const edge = topology.links.find(l => (l.device1 == device1 && l.device2 == device2) || (l.device1 == device2 && l.device2 == device1));
+        if (edge){
+            edges.push(edge);
+        }
+    }
+
+    return {route, edges, distance: table[d2].distance};
+}
+
+function dijkstra(topology: Topology, source: string){
+    // Dijkstra's distances table
+    // {'C1': (0, None), 'C2': (5, 'C1'), ...}
+    let distances: {[key: string]: {distance: number, previous: string | undefined}} = {}
+
+    // List of unvisited nodes
+    let unvisited = topology.devices.map(d => d.name);
+
+    // Initialize distances
+    unvisited.forEach(u => {
+        distances[u] = {distance: Infinity, previous: undefined}
+    })
+
+    // Set distance to self to 0
+    distances[source].distance = 0;
+
+    // Run Dijkstra's algorithm
+    while (unvisited.length > 0){
+        // Find node with smallest distance
+        const minimum = unvisited.reduce((min, node) => distances[node].distance < distances[min].distance ? node : min, unvisited[0]);
+
+        const neighbours = get_neighbours(topology, minimum);
+
+        // Update distances of unvisited neighbours
+        neighbours.forEach(n => {
+            if (unvisited.includes(n)){
+                const distance = distances[minimum].distance + 1;
+
+                if (distance < distances[n].distance){
+                    distances[n].distance = distance;
+                    distances[n].previous = minimum;
+                }
+            }
+        })
+        
+        // Mark node as visited
+        unvisited = unvisited.filter(u => u != minimum);
+    }
+    
+    return distances;
+}
+
+function get_neighbours(topology: Topology, device: string){
+    return topology.links.filter(l => l.device1 == device || l.device2 == device)
+    .map(l => l.device1 == device ? l.device2 : l.device1);
 }

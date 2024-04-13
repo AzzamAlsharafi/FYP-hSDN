@@ -210,7 +210,13 @@ export const appSlice = createSlice({
       updatePolicies(state)
     },
     selectNodes: (state, action: PayloadAction<Node[]>) => {
-      state.selectedNodes = action.payload
+      const currentIds = state.selectedNodes.map(n => n.id)
+      const selectionIds = action.payload.map(n => n.id)
+
+      const oldNodes = state.selectedNodes.filter(n => selectionIds.includes(n.id))
+      const newNodes = action.payload.filter(n => !currentIds.includes(n.id))
+
+      state.selectedNodes = [...oldNodes, ...newNodes]
     },
     selectEdges: (state, action: PayloadAction<Edge[]>) => {
       state.selectedEdges = action.payload
@@ -353,6 +359,39 @@ export const appSlice = createSlice({
       state.policies = [...state.policies, ...newPolicies]
       
       updatePolicies(state)
+    },
+    addRoute: (state, action: PayloadAction<{flow: string, route: string}>) => {
+      const devices = action.payload.route.split('-');
+
+      let newPolicies: RoutePolicy[] = [];
+
+      for (let i = 0; i < devices.length - 1; i++) {
+        const d1 = devices[i];
+        const d2 = devices[i + 1];
+
+        const link = state.topology.links.find(l => 
+          (l.device1 == d1 && l.device2 == d2) || 
+          (l.device1 == d2 && l.device2 == d1));
+
+        if (link) {
+          const exitPort = link.device1 == d1 ? link.port1 : link.port2;
+
+          const newPolicy = {
+            type: 'route',
+            device: d1,
+            flow: action.payload.flow,
+            interface: state.topology.devices.find(d => d.name == d1)!.ports.findIndex(p => p.interface_name == exitPort),
+          } as RoutePolicy
+
+          newPolicies.push(newPolicy)
+        }
+      }
+
+      newPolicies.forEach(p => sendToApiQueue(`policy new ${policyToWords(p)}`))
+
+      state.policies = [...state.policies, ...newPolicies]
+
+      updatePolicies(state)
     }
   }
 })
@@ -373,7 +412,7 @@ function updatePolicies(state: AppState){
 
 export const { loadTopology, loadConfig, loadPolicies, selectNodes, selectEdges, openPolicy, 
   closePolicy, updateModal, discardPolicy, savePolicy, deletePolicy, openDevice, closeDevice, 
-  updateDevice, discardDevice, saveDevice, deleteDevice, addZone } = appSlice.actions
+  updateDevice, discardDevice, saveDevice, deleteDevice, addZone, addRoute } = appSlice.actions
 
 export const topologySelector = (state: { app: AppState }) => state.app.topology;
 export const configSelector = (state: { app: AppState }) => state.app.config;
