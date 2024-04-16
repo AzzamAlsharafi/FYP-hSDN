@@ -62,7 +62,7 @@ export default function TopologyGraph() {
         setNodes(createNodes(topology, subnets, nodes));
         setEdges(createEdges(topology, subnets, edges));
 
-    }, [topology]); 
+    }, [subnets, topology]); 
 
     useOnSelectionChange({
         onChange: ({ nodes, edges }) => {
