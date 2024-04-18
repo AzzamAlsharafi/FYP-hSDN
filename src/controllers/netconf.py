@@ -670,9 +670,9 @@ class Device:
         try:
             route_reply = ET.fromstring(self.manager.get(filter).data_xml)
 
-            if route_reply.find('.//{http://openconfig.net/yang/network-instance}static-route') is not None:
-                self.manager.edit_config(config=config)
-                self.manager.commit()
+            # if route_reply.find('.//{http://openconfig.net/yang/network-instance}static-route') is not None:
+            self.manager.edit_config(config=config)
+            self.manager.commit()
             
             self.logger.debug(f'Deconfigured routes on {self.ip_address} ({self.hostname})')
 
