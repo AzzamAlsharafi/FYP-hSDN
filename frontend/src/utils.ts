@@ -376,3 +376,12 @@ function get_neighbours(topology: Topology, device: string){
     return topology.links.filter(l => l.device1 == device || l.device2 == device)
     .map(l => l.device1 == device ? l.device2 : l.device1);
 }
+
+export function getLinkColor(score: number){ // score is between 0 and 1
+    const c1 = [0, 255, 0] // Green
+    const c2 = [255, 0, 0] // Red
+
+    const r = c1.map((c, i) => c + (c2[i] - c) * score);
+    
+    return `rgb(${r[0]}, ${r[1]}, ${r[2]})`
+}
